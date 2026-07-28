@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/frontend#231",
+  "dependency": "eslint",
+  "old_version": "8.57.0",
+  "new_version": "9.0.0",
+  "has_breaking_change": true,
+  "notes": "Major release. Flat config (eslint.config.js) becomes the default and eslintrc is deprecated; Node.js support is narrowed; several rules and formatters were removed. Any repo still on .eslintrc will break without ESLINT_USE_FLAT_CONFIG=false.",
+  "evidence": [
+    {
+      "source": "release-blog",
+      "url": "https://eslint.org/blog/2024/04/eslint-v9.0.0-released/",
+      "text": "Flat config is now the default configuration format for ESLint and eslintrc is officially deprecated. Users must set the ESLINT_USE_FLAT_CONFIG environment variable to false to continue using eslintrc configuration files. As of this post, Node.js v20.x is the LTS release, and as such we are dropping support for all versions of Node.js prior to v18.18.0 as well as v19.x. ESLint v9.0.0 now requires Node.js ^18.18.0 || ^20.9.0 || >=21.1.0. Function-style rules no longer work. Multiple formatters were removed and only stylish, html, json, and json-with-meta remain. The valid-jsdoc and require-jsdoc rules were removed. Several deprecated context methods were removed and CodePath#currentSegments was removed from the rules API. Using multiple /* eslint */ configuration comments for the same rule now causes a lint error."
+    }
+  ]
+}

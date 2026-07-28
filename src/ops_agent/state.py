@@ -27,6 +27,17 @@ class Finding(BaseModel):
     quote: str
 
 
+class Findings(BaseModel):
+    """Container for a list of Findings.
+
+    Structured-output backends (``with_structured_output``) require a schema
+    class — a bare ``list[Finding]`` generic is rejected — so extraction targets
+    this wrapper and reads ``.findings``.
+    """
+
+    findings: list[Finding] = []
+
+
 class Verdict(BaseModel):
     """Final decision on a Renovate PR."""
 

@@ -19,7 +19,13 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from ops_agent.llm.personas import get_llm
-from ops_agent.state import EvidenceItem, Finding, RenovateReviewState, Verdict
+from ops_agent.state import (
+    EvidenceItem,
+    Finding,
+    Findings,
+    RenovateReviewState,
+    Verdict,
+)
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.gitea import GiteaClient
 from ops_agent.tools.search import get_search_tool
@@ -170,7 +176,7 @@ def extract_breaking_changes(state: RenovateReviewState) -> dict[str, Any]:
     )
 
     llm = get_llm("extract")
-    structured_llm = llm.with_structured_output(list[Finding])
+    structured_llm = llm.with_structured_output(Findings)
 
     messages = [
         SystemMessage(content=_EXTRACT_SYSTEM),
@@ -179,12 +185,13 @@ def extract_breaking_changes(state: RenovateReviewState) -> dict[str, Any]:
                 f"Dependency: {state['dependency']} "
                 f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
                 f"Evidence:\n{evidence_block}\n\n"
-                "Return a list of Finding objects. Each must have claim, source, and quote."
+                "Return a list of findings. Each must have claim, source, and quote."
             )
         ),
     ]
 
-    findings: list[Finding] = structured_llm.invoke(messages)  # type: ignore[assignment]
+    result: Findings = structured_llm.invoke(messages)  # type: ignore[assignment]
+    findings: list[Finding] = result.findings if result else []
     # Filter out any findings that somehow have an empty quote (defensive).
     findings = [f for f in (findings or []) if f.quote.strip()]
 

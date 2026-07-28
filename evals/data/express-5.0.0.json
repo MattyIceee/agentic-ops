@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/api-gateway#188",
+  "dependency": "express",
+  "old_version": "4.19.2",
+  "new_version": "5.0.0",
+  "has_breaking_change": true,
+  "notes": "Major release with a large list of removed/changed APIs and a new path-matching syntax (path-to-regexp upgrade). Requires Node.js 18+. Route strings using bare '*' or trailing '?' will throw. Clearly breaking.",
+  "evidence": [
+    {
+      "source": "migration-guide",
+      "url": "https://expressjs.com/en/guide/migrating-5.html",
+      "text": "Express 5 no longer supports the app.del() function. Use app.delete() instead. The req.param(name) method has been removed; use req.params, req.body, or req.query instead. Express 5 no longer supports res.json(obj, status); use res.status(status).json(obj). Express 5 no longer supports res.send(status) where status is a number; use res.sendStatus(statusCode) instead. res.sendfile() was replaced by the camel-cased res.sendFile(). Path route matching syntax changed: the wildcard * must be named (/* becomes /*splat), the optional character ? is no longer supported (/:file.:ext? becomes /:file{.:ext}), and reserved characters ()[]?+! must be escaped with a backslash. Express 5 requires Node.js version 18 or higher. The express.urlencoded extended option now defaults to false. req.body returns undefined when the body has not been parsed (was {} in Express 4). req.query is no longer writable; it is now a getter. res.status only accepts integers in the range 100-999 and throws otherwise. Rejected promises returned from middleware and handlers are now automatically forwarded to error-handling middleware."
+    }
+  ]
+}

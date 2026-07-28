@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/frontend#204",
+  "dependency": "axios",
+  "old_version": "0.27.2",
+  "new_version": "1.0.0",
+  "has_breaking_change": true,
+  "notes": "First stable major. URL parameter serialization changed (params are now percent-encoded by default), the request-interceptor config type changed, and the ESM/default export was reworked. Existing code that relied on the old param serialization or on named type imports needs migration.",
+  "evidence": [
+    {
+      "source": "upgrade-guide",
+      "url": "https://axios-http.com/docs/upgrade_guide",
+      "text": "v1.x introduced several breaking changes to how URL parameters are serialized. The most important one is that params are now percent-encoded by default, which changes the on-the-wire representation of requests compared to 0.x. The import surface changed so that consumers use the default export. When typing the config parameter in a request interceptor you now need to use the InternalAxiosRequestConfig type instead of AxiosRequestConfig. There are multiple deprecations, refactors, and removals in this release; read through the full release notes to see how this may impact your project and use case."
+    }
+  ]
+}

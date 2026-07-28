@@ -1,0 +1,20 @@
+{
+  "pr_ref": "homelab/frontend#142",
+  "dependency": "lodash",
+  "old_version": "4.17.20",
+  "new_version": "4.17.21",
+  "has_breaking_change": false,
+  "notes": "Patch release. Fixes a command-injection vulnerability in the template function (CVE-2021-23337) and a ReDoS in toNumber/trim (CVE-2020-28500). Security-only; no public API changes. A safety-critical extractor should NOT flag this as breaking — good false-positive check.",
+  "evidence": [
+    {
+      "source": "advisory",
+      "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+      "text": "CVE-2021-23337: Command Injection in lodash. lodash versions prior to 4.17.21 are vulnerable to Command Injection via the template function. Affected: < 4.17.21. Patched: 4.17.21. Severity: High (CVSS 7.2). This is a security fix delivered as a patch release; the public API of lodash is unchanged."
+    },
+    {
+      "source": "advisory",
+      "url": "https://github.com/advisories/GHSA-29mw-wpgm-hmr9",
+      "text": "CVE-2020-28500: Regular Expression Denial of Service (ReDoS) in lodash. lodash versions prior to 4.17.21 are vulnerable to ReDoS via the toNumber, trim and trimEnd functions. Patched in 4.17.21. No breaking API changes were introduced by this patch."
+    }
+  ]
+}

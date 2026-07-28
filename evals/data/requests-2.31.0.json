@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/ops-scripts#57",
+  "dependency": "requests",
+  "old_version": "2.30.0",
+  "new_version": "2.31.0",
+  "has_breaking_change": false,
+  "notes": "Security release for CVE-2023-32681 (Proxy-Authorization header leaked to destination on HTTPS redirect). Fix is transparent for standard usage; only affects the internal redirect handling. No public API changes. Non-breaking for typical users.",
+  "evidence": [
+    {
+      "source": "changelog",
+      "url": "https://github.com/psf/requests/blob/main/HISTORY.md",
+      "text": "2.31.0 Security: Versions of Requests between v2.3.0 and v2.30.0 are vulnerable to potential forwarding of Proxy-Authorization headers to destination servers when following HTTPS redirects. When proxies are defined with user info (https://user:pass@proxy:8080), Requests will construct a Proxy-Authorization header that is attached to the request to authenticate with the proxy. In cases where Requests receives a redirect response, it previously reattached the Proxy-Authorization header incorrectly, resulting in the value being sent through the tunneled connection to the destination server. Users who do not use a proxy or do not supply their proxy credentials through the user information portion of their proxy URL are not subject to this vulnerability. This is a security fix with no breaking public API changes."
+    }
+  ]
+}

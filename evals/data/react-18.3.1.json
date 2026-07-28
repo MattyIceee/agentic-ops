@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/frontend#219",
+  "dependency": "react",
+  "old_version": "18.2.0",
+  "new_version": "18.3.1",
+  "has_breaking_change": false,
+  "notes": "Minor + patch. 18.3 is intentionally 'identical to 18.2 but adds warnings for deprecated APIs' ahead of React 19; 18.3.1 only exports act from react. New console deprecation warnings appear but no runtime behavior breaks. Classic false-positive trap: the word 'deprecated' appears many times but nothing is removed.",
+  "evidence": [
+    {
+      "source": "changelog",
+      "url": "https://github.com/facebook/react/blob/main/CHANGELOG.md",
+      "text": "18.3.1 (April 26, 2024): Export act from react. 18.3.0 (April 25, 2024): This release is identical to 18.2 but adds warnings for deprecated APIs and other changes that are needed for React 19. It adds a warning for the deprecated findDOMNode outside StrictMode, a warning for deprecated test-utils methods, a warning for deprecated Legacy Context outside StrictMode, a warning for deprecated string refs outside StrictMode, a warning for deprecated defaultProps for function components, a warning when spreading key, a warning when using act from test-utils, a warning for deprecated unmountComponentAtNode, and a warning for deprecated renderToStaticNodeStream. These are warnings only; existing code continues to run."
+    }
+  ]
+}

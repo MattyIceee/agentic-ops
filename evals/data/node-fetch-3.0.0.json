@@ -1,0 +1,15 @@
+{
+  "pr_ref": "homelab/scraper#96",
+  "dependency": "node-fetch",
+  "old_version": "2.6.7",
+  "new_version": "3.0.0",
+  "has_breaking_change": true,
+  "notes": "Major release that converts the package to ESM-only and raises the minimum Node.js version. CommonJS projects using require('node-fetch') break and must switch to dynamic import or stay on 2.x.",
+  "evidence": [
+    {
+      "source": "release-notes",
+      "url": "https://github.com/node-fetch/node-fetch/releases/tag/v3.0.0",
+      "text": "node-fetch v3.0.0 is an ESM-only package. You cannot import it with require() anymore; use ESM import syntax or a dynamic import() from CommonJS. The minimum supported Node.js version is now 12.20. Consult the changelog for the full list of breaking changes before upgrading."
+    }
+  ]
+}
