@@ -5,8 +5,14 @@ from langchain_openai import ChatOpenAI
 from ops_agent.llm.personas import PERSONAS, get_llm
 
 
-def test_all_four_personas_present():
-    assert set(PERSONAS) == {"research", "coding", "extract", "instruct"}
+def test_all_personas_present():
+    assert set(PERSONAS) == {"research", "coding", "extract", "instruct", "reason"}
+
+
+def test_reason_params():
+    p = PERSONAS["reason"]
+    assert p.enable_thinking is False
+    assert 0.0 < p.temperature < 0.5
 
 
 def test_extract_params():

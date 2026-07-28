@@ -23,7 +23,11 @@ def _cmd_review_pr(args: argparse.Namespace) -> None:
     from ops_agent.graphs.renovate_review import run
     from ops_agent.state import Verdict
 
-    verdict: Verdict = run(pr_index=args.pr, owner=args.owner, repo=args.repo)
+    try:
+        verdict: Verdict = run(pr_index=args.pr, owner=args.owner, repo=args.repo)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"\nDecision: {verdict.decision}")
     print(f"Summary:  {verdict.summary}")
@@ -51,7 +55,11 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
 
     from ops_agent.graphs.scaffold_deploy import run
 
-    pr_url: str | None = run(prompt=prompt)
+    try:
+        pr_url: str | None = run(prompt=prompt)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if pr_url:
         print(f"\nPR opened: {pr_url}")

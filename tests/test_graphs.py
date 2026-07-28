@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from ops_agent.state import EvidenceItem, Finding, Verdict
+from ops_agent.state import EvidenceItem, Finding, RiskAssessment, Verdict
 
 # ─────────────────────────── compile tests ─────────────────────────────────
 
@@ -47,6 +47,8 @@ _RENOVATE_INITIAL: dict = {
     "diff": "",
     "renovate_rating": None,
     "evidence": [],
+    "_findings": [],
+    "_risk": None,
     "verdict": None,
     "posted": False,
 }
@@ -70,6 +72,7 @@ def test_renovate_graph_clear_path(monkeypatch):
     })
     # Return empty dict → _findings absent → assemble_verdict defaults to []
     monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {})
+    monkeypatch.setattr(rr, "assess_risk", lambda s: {})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_renovate_graph()
@@ -78,6 +81,84 @@ def test_renovate_graph_clear_path(monkeypatch):
     assert result["posted"] is True
     assert isinstance(result["verdict"], Verdict)
     assert result["verdict"].decision == "clear"
+
+
+def test_renovate_findings_propagate_to_verdict(monkeypatch):
+    """Regression guard: _findings from extract must reach assemble_verdict.
+
+    Undeclared state keys are silently dropped by LangGraph, so _findings must be
+    a declared channel. assemble_verdict runs for real here to prove it arrives.
+    """
+    import ops_agent.graphs.renovate_review as rr
+
+    finding = Finding(claim="removed foo()", source="changelog", quote="foo() was removed", category="breaking")
+
+    monkeypatch.setattr(rr, "ingest_pr", lambda s: {
+        "dependency": "mylib", "current_version": "1.0.0", "new_version": "2.0.0",
+        "diff": "", "renovate_rating": None,
+    })
+    monkeypatch.setattr(rr, "research", lambda s: {
+        "evidence": [EvidenceItem(source="changelog", url=None, text="foo() was removed")],
+    })
+    monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {"_findings": [finding]})
+    monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
+
+    graph = rr.build_renovate_graph()
+    result = graph.invoke(dict(_RENOVATE_INITIAL))
+
+    assert result["verdict"].decision == "breaking"
+    assert result["verdict"].findings[0].claim == "removed foo()"
+
+
+def test_renovate_graph_regression_path(monkeypatch):
+    """A calendar-vs-semver scheme swap is flagged as a regression, not 'clear'."""
+    import ops_agent.graphs.renovate_review as rr
+
+    monkeypatch.setattr(rr, "ingest_pr", lambda s: {
+        "dependency": "lscr.io/linuxserver/jellyfin",
+        "current_version": "10.11.11", "new_version": "2021.12.16",
+        "diff": "", "renovate_rating": None,
+    })
+    monkeypatch.setattr(rr, "research", lambda s: {
+        "evidence": [EvidenceItem(source="dockerhub", url=None, text="pushed over 4 years ago")],
+    })
+    monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {})
+    monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
+
+    graph = rr.build_renovate_graph()
+    result = graph.invoke(dict(_RENOVATE_INITIAL))
+
+    assert result["verdict"].decision == "regression"
+    assert any(f.category == "regression" for f in result["verdict"].findings)
+
+
+def test_renovate_graph_reasoned_risk_path(monkeypatch):
+    """No verbatim finding, but the reasoned layer flags high risk → needs_human."""
+    import ops_agent.graphs.renovate_review as rr
+
+    monkeypatch.setattr(rr, "ingest_pr", lambda s: {
+        "dependency": "mylib", "current_version": "1.0.0", "new_version": "2.0.0",
+        "diff": "", "renovate_rating": None,
+    })
+    monkeypatch.setattr(rr, "research", lambda s: {
+        "evidence": [EvidenceItem(source="changelog", url=None, text="major rewrite; config format changed")],
+    })
+    monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {"_findings": []})
+    monkeypatch.setattr(rr, "assess_risk", lambda s: {
+        "_risk": RiskAssessment(could_break=True, risk_level="high",
+                                rationale="Major-version rewrite with config changes.",
+                                signals=["1.x → 2.x major bump", "config format changed"]),
+    })
+    monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
+
+    graph = rr.build_renovate_graph()
+    result = graph.invoke(dict(_RENOVATE_INITIAL))
+
+    assert result["verdict"].decision == "needs_human"
+    assert result["verdict"].risk is not None
+    assert result["verdict"].risk.risk_level == "high"
 
 
 def test_renovate_graph_breaking_path(monkeypatch):
@@ -97,8 +178,8 @@ def test_renovate_graph_breaking_path(monkeypatch):
         "evidence": [EvidenceItem(source="changelog", url=None, text="removed foo()")],
     })
     monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {})
-    # _findings is not in the TypedDict so LangGraph drops it between nodes;
-    # stub assemble_verdict directly to test the 'breaking' branch.
+    monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    # Stub assemble_verdict directly to test the 'breaking' branch wiring.
     monkeypatch.setattr(rr, "assemble_verdict", lambda s: {
         "verdict": Verdict(decision="breaking", findings=[finding], summary="1 breaking change found."),
     })
@@ -249,3 +330,58 @@ def test_scaffold_graph_self_review_retry_loop(monkeypatch):
     assert len(review_calls) == 2, "self_review should be called twice"
     assert result["retry_count"] == 1
     assert result["pr_url"] == "https://gitea.test/myorg/myrepo/pulls/1"
+
+
+# ─────────────────────── version-analysis unit tests ───────────────────────
+
+
+@pytest.mark.parametrize("current,new,expected", [
+    ("10.11.11", "2021.12.16", "scheme_change"),  # semver → calver (the jellyfin trap)
+    ("2021.12.16", "10.11.11", "scheme_change"),  # calver → semver
+    ("2.32.0", "2.28.0", "downgrade"),            # plain downgrade
+    ("2.28.0", "2.32.0", None),                   # normal upgrade
+    ("1.0.0", "2.0.0", None),                     # major upgrade, still forward
+    ("2020.1.1", "2021.1.1", None),               # calver → calver upgrade
+    ("", "2.0.0", None),                          # unknown current → no opinion
+    ("latest", "stable", None),                   # non-numeric → no opinion
+])
+def test_analyze_version_direction(current, new, expected):
+    from ops_agent.graphs.renovate_review import _analyze_version_direction
+
+    assert _analyze_version_direction(current, new) == expected
+
+
+def test_parse_version_components_stops_at_non_numeric():
+    from ops_agent.graphs.renovate_review import _parse_version_components
+
+    assert _parse_version_components("10.11.11ubu2604-ls43") == [10, 11, 11]
+    assert _parse_version_components("v2.3.4") == [2, 3, 4]
+    assert _parse_version_components("nightly") is None
+
+
+def test_extract_current_version_from_diff():
+    from ops_agent.graphs.renovate_review import _extract_current_version_from_diff
+
+    diff = (
+        "--- a/jellyfin.tf\n"
+        "+++ b/jellyfin.tf\n"
+        '-  image = "lscr.io/linuxserver/jellyfin:10.11.11"\n'
+        '+  image = "lscr.io/linuxserver/jellyfin:2021.12.16"\n'
+    )
+    assert _extract_current_version_from_diff(diff, "2021.12.16") == "10.11.11"
+
+
+def test_scheme_change_regression_finding_shape():
+    """assemble_verdict injects a regression finding for a scheme change."""
+    from ops_agent.graphs.renovate_review import assemble_verdict
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "jellyfin", "current_version": "10.11.11",
+        "new_version": "2021.12.16",
+        "evidence": [EvidenceItem(source="x", url=None, text="old")],
+    })
+    out = assemble_verdict(state)
+    verdict = out["verdict"]
+    assert verdict.decision == "regression"
+    assert verdict.findings[0].source == "version-analysis"

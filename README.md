@@ -58,8 +58,8 @@ Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/) are required on the machine
 
 ```bash
 # 1. Clone and enter the repo
-git clone <your-gitea-url>/ops-agent.git
-cd ops-agent
+git clone https://gitea.local.southpinesquad.com/mattyice/homelab-agentic-agent.git
+cd homelab-agentic-agent
 
 # 2. Install dependencies
 uv sync

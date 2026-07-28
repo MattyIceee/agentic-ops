@@ -30,6 +30,7 @@ PERSONAS: dict[str, PersonaParams] = {
     "research": PersonaParams(temperature=0.7, top_p=0.95, top_k=40, presence_penalty=0.0, enable_thinking=True),
     "coding":   PersonaParams(temperature=0.25, top_p=0.9, top_k=40, presence_penalty=0.0, enable_thinking=True),
     "extract":  PersonaParams(temperature=0.0, top_p=1.0, top_k=0,  presence_penalty=0.0, enable_thinking=False),
+    "reason":   PersonaParams(temperature=0.2, top_p=0.9, top_k=40, presence_penalty=0.0, enable_thinking=False),
     "instruct": PersonaParams(temperature=0.3, top_p=0.9, top_k=40, presence_penalty=0.0, enable_thinking=False),
 }
 

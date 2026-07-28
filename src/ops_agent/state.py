@@ -20,11 +20,17 @@ class EvidenceItem(BaseModel):
 
 
 class Finding(BaseModel):
-    """A single breaking-change claim grounded in a verbatim quote from evidence."""
+    """A single risk claim grounded in a verbatim quote from evidence.
+
+    ``category`` distinguishes a documented breaking change from a *regression*
+    signal — evidence that the new version is older, stale, deprecated, yanked,
+    or otherwise a downgrade relative to the current or latest release.
+    """
 
     claim: str
     source: str
     quote: str
+    category: Literal["breaking", "regression"] = "breaking"
 
 
 class Findings(BaseModel):
@@ -38,24 +44,45 @@ class Findings(BaseModel):
     findings: list[Finding] = []
 
 
+class RiskAssessment(BaseModel):
+    """A reasoned (non-verbatim) judgment about whether an update could break.
+
+    Unlike a :class:`Finding`, this is allowed to *infer* — it weighs the
+    gathered evidence and expresses a level of confidence. It complements, and
+    never overrides, verbatim-grounded findings.
+    """
+
+    could_break: bool = False
+    risk_level: Literal["none", "low", "medium", "high"] = "none"
+    rationale: str = ""
+    signals: list[str] = []
+
+
 class Verdict(BaseModel):
     """Final decision on a Renovate PR."""
 
-    decision: Literal["clear", "breaking", "needs_human"]
+    decision: Literal["clear", "breaking", "regression", "needs_human"]
     findings: list[Finding]
     summary: str
+    risk: RiskAssessment | None = None
 
 
 class RenovateReviewState(TypedDict):
     """State for Graph A: Renovate PR reviewer."""
 
     pr_index: int
+    _owner: str
+    _repo: str
     dependency: str
     current_version: str
     new_version: str
     diff: str
     renovate_rating: str | None
     evidence: Annotated[list[EvidenceItem], operator.add]
+    # Intermediate channels — must be declared, or LangGraph silently drops
+    # them between nodes (undeclared keys do not propagate).
+    _findings: list[Finding]
+    _risk: RiskAssessment | None
     verdict: Verdict | None
     posted: bool
 
