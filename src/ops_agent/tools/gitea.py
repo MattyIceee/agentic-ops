@@ -115,6 +115,11 @@ class GiteaClient:
         data = self._get(f"/repos/{owner}/{repo}/contents/{path}", ref=ref).json()
         return base64.b64decode(data["content"]).decode()
 
+    @_retry
+    def get_issue(self, owner: str, repo: str, index: int) -> dict:
+        """Fetch issue metadata. Returns the Gitea issue object as a dict."""
+        return self._get(f"/repos/{owner}/{repo}/issues/{index}").json()
+
     def close(self) -> None:
         self._client.close()
 

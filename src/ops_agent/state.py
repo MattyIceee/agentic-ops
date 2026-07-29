@@ -73,6 +73,7 @@ class RenovateReviewState(TypedDict):
     pr_index: int
     _owner: str
     _repo: str
+    thread_id: str  # Checkpoint key: based on last commit ID from PR
     dependency: str
     current_version: str
     new_version: str
@@ -91,6 +92,7 @@ class DeployScaffoldState(TypedDict):
     """State for Graph B: deployment scaffolder."""
 
     request: str
+    thread_id: str  # Checkpoint key: based on issue_number or explicit id parameter
     provided_links: list[str]
     spec: dict
     service_evidence: Annotated[list[EvidenceItem], operator.add]

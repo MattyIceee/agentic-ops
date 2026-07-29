@@ -43,6 +43,10 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
     """Run Graph B: scaffold a deployment from a prompt and open a PR."""
     _require_settings()
 
+    if hasattr(args, 'issue') and args.issue and (not args.owner or not args.repo):
+        print("Error: --issue requires both --owner and --repo", file=sys.stderr)
+        sys.exit(1)
+
     if args.prompt_file:
         try:
             with open(args.prompt_file) as fh:
@@ -50,13 +54,28 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
         except OSError as exc:
             print(f"Error reading prompt file: {exc}", file=sys.stderr)
             sys.exit(1)
+    elif hasattr(args, 'issue') and args.issue:
+        from ops_agent.tools.gitea import GiteaClient
+
+        try:
+            client = GiteaClient()
+            try:
+                issue = client.get_issue(args.owner, args.repo, args.issue)
+                prompt = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
+            finally:
+                client.close()
+        except Exception as exc:
+            print(f"Error fetching issue: {exc}", file=sys.stderr)
+            sys.exit(1)
     else:
         prompt = args.prompt
 
     from ops_agent.graphs.scaffold_deploy import run
 
+    # Pass issue number if available for linking in PR
+    issue_number = getattr(args, 'issue', None) if hasattr(args, 'issue') else None
     try:
-        pr_url: str | None = run(prompt=prompt)
+        pr_url: str | None = run(prompt=prompt, issue_number=issue_number)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -98,6 +117,14 @@ def main() -> None:
     prompt_grp.add_argument(
         "--prompt-file", metavar="PATH", help="Path to a file containing the deployment request"
     )
+    prompt_grp.add_argument(
+        "--issue",
+        type=int,
+        metavar="N",
+        help="Gitea issue number (requires --owner and --repo)",
+    )
+    scaffold_p.add_argument("--owner", metavar="OWNER", help="Gitea repo owner (required with --issue)")
+    scaffold_p.add_argument("--repo", metavar="REPO", help="Gitea repo name (required with --issue)")
     scaffold_p.set_defaults(func=_cmd_scaffold)
 
     args = parser.parse_args()
