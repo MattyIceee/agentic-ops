@@ -20,8 +20,8 @@ def _cmd_review_pr(args: argparse.Namespace) -> None:
     """Run Graph A: review a Renovate PR and post a comment."""
     _require_settings()
 
-    from ops_agent.graphs.renovate_review import run
-    from ops_agent.state import Verdict
+    from ops_agent.graphs.update_review import run
+    from ops_agent.types import Verdict
 
     try:
         verdict: Verdict = run(pr_index=args.pr, owner=args.owner, repo=args.repo)
@@ -70,7 +70,7 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
     else:
         prompt = args.prompt
 
-    from ops_agent.graphs.scaffold_deploy import run
+    from ops_agent.graphs.service_deploy import run
 
     # Pass issue number if available for linking in PR
     issue_number = getattr(args, 'issue', None) if hasattr(args, 'issue') else None
