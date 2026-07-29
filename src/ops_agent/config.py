@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     checkpoint_db_password: str = "ops_agent_dev_password"
     checkpoint_db_name: str = "ops_agent_checkpoints"
 
+    # Langfuse tracing — optional
+    langfuse_enabled: bool = False
+    langfuse_secret_key: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_base_url: str = "http://localhost:3000"
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

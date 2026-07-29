@@ -1,5 +1,6 @@
 """Node: parse_request - parse user request into structured spec."""
 
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
+
+logger = logging.getLogger(__name__)
 
 _PARSE_SYSTEM = """\
 You are a deployment spec parser. Given a user request describing a service to
@@ -55,8 +58,7 @@ def parse_request(state: ServiceDeployState) -> dict[str, Any]:
             "provided_links": result.provided_links,
         }
     except Exception as exc:
-        import sys
-        print(f"Warning: parse_request failed: {exc}", file=sys.stderr)
+        logger.warning("parse_request failed: %s", exc)
         return {
             "spec": {"name": "unknown", "namespace": "default", "ports": [], "env": {}, "volumes": []},
             "provided_links": [],

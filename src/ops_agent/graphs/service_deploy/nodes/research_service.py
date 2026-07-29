@@ -1,6 +1,7 @@
 """Node: research_service - gathers service deployment evidence."""
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -12,6 +13,8 @@ from ops_agent.state import ServiceDeployState
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.search import get_search_tool
 from ops_agent.types import EvidenceItem
+
+logger = logging.getLogger(__name__)
 
 _RESEARCH_SERVICE_SYSTEM = """\
 You are a deployment researcher. Given a service name and any links provided by
@@ -74,6 +77,5 @@ def research_service(state: ServiceDeployState) -> dict[str, Any]:
 
         return {"service_evidence": evidence}
     except Exception as exc:
-        import sys
-        print(f"Warning: research_service failed: {exc}", file=sys.stderr)
+        logger.warning("research_service failed: %s", exc)
         return {"service_evidence": []}

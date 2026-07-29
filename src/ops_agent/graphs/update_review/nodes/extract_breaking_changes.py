@@ -1,5 +1,6 @@
 """Node: extract_breaking_changes - structured extraction of quote-backed findings."""
 
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -7,6 +8,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import UpdateReviewState
 from ops_agent.types import Finding, Findings
+
+logger = logging.getLogger(__name__)
 
 _EXTRACT_SYSTEM = """\
 You are a precise risk extractor. You receive evidence snippets and must \
@@ -66,9 +69,5 @@ def extract_breaking_changes(state: UpdateReviewState) -> dict[str, Any]:
 
         return {"_findings": findings}
     except Exception as exc:
-        import sys
-        print(
-            f"Warning: extract_breaking_changes failed for {state['dependency']}: {exc}",
-            file=sys.stderr,
-        )
+        logger.warning("extract_breaking_changes failed for %s: %s", state["dependency"], exc)
         return {}

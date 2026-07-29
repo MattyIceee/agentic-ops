@@ -12,6 +12,7 @@ falling through to commit_and_pr regardless of review outcome.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 from langgraph.graph import END, StateGraph
@@ -25,6 +26,9 @@ from ops_agent.graphs.service_deploy.nodes.parse_request import parse_request
 from ops_agent.graphs.service_deploy.nodes.research_service import research_service
 from ops_agent.graphs.service_deploy.nodes.self_review import self_review
 from ops_agent.state import ServiceDeployState
+from ops_agent.tracing import get_langfuse_handler
+
+logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 2
 
@@ -130,8 +134,6 @@ def run(
 
     Returns the PR URL from the final state, or None if not set.
     """
-    compiled = build_graph()
-
     # Determine the checkpoint thread_id
     if thread_id:
         checkpoint_id = thread_id
@@ -141,6 +143,26 @@ def run(
         checkpoint_id = id
     else:
         checkpoint_id = "scaffold_deploy_no_id"
+
+    trace_name = f"service-deploy/{checkpoint_id}"
+    logger.info("Starting %s", trace_name)
+
+    tags = ["graph:service-deploy"]
+    if issue_number:
+        tags.append("from-issue")
+
+    ctx = get_langfuse_handler(
+        trace_name=trace_name,
+        tags=tags,
+        metadata={
+            "issue_number": issue_number,
+            "owner": owner,
+            "repo": repo,
+            "request": prompt[:200],
+        },
+    )
+
+    compiled = build_graph()
 
     initial_state: dict[str, Any] = {
         "request": prompt,
@@ -161,9 +183,32 @@ def run(
         "issue_number": issue_number,
     }
 
+    callbacks = [ctx.handler] if ctx.handler else []
+    config = {
+        "callbacks": callbacks,
+        "configurable": {"thread_id": checkpoint_id},
+    }
+
     # Use thread_id for checkpoint resumption if available
     if checkpoint_id and checkpoint_id != "scaffold_deploy_no_id":
-        final_state = compiled.invoke(initial_state, config={"configurable": {"thread_id": checkpoint_id}})
+        final_state = compiled.invoke(initial_state, config=config)
     else:
-        final_state = compiled.invoke(initial_state)
+        final_state = compiled.invoke(initial_state, config=config)
+
+    # Post-execution trace enrichment
+    if ctx.handler:
+        manifest_type = "helm" if final_state.get("helm_chart_found") else "kustomize"
+        tags_update = ["manifest:" + manifest_type]
+        if final_state.get("retry_count", 0) > 0:
+            tags_update.append("review-retried")
+
+        ctx.handler.langfuse_client.trace(id=ctx.handler.trace_id).update(
+            tags=tags_update,
+            metadata={
+                "manifest_type": manifest_type,
+                "retry_count": final_state.get("retry_count", 0),
+                "pr_url": final_state.get("pr_url"),
+            },
+        )
+
     return final_state.get("pr_url")

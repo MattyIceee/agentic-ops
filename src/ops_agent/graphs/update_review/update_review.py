@@ -17,6 +17,7 @@ Linear graph: ingest_pr → research → extract_breaking_changes → assess_ris
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -28,7 +29,10 @@ from ops_agent.graphs.update_review.nodes.ingest_pr import ingest_pr
 from ops_agent.graphs.update_review.nodes.post_review import post_review
 from ops_agent.graphs.update_review.nodes.research import research
 from ops_agent.state import UpdateReviewState
+from ops_agent.tracing import get_langfuse_handler
 from ops_agent.types import Verdict
+
+logger = logging.getLogger(__name__)
 
 
 def build_graph() -> Any:
@@ -73,6 +77,15 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
 
     Returns the Verdict from the final state.
     """
+    trace_name = f"update-review/{owner}/{repo}#{pr_index}"
+    logger.info("Starting %s", trace_name)
+
+    ctx = get_langfuse_handler(
+        trace_name=trace_name,
+        tags=["graph:update-review"],
+        metadata={"owner": owner, "repo": repo, "pr_index": pr_index},
+    )
+
     compiled = build_graph()
     initial_state: dict[str, Any] = {
         "pr_index": pr_index,
@@ -90,9 +103,31 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
         "verdict": None,
         "posted": False,
     }
+
+    callbacks = [ctx.handler] if ctx.handler else []
+    config = {
+        "callbacks": callbacks,
+        "configurable": {"thread_id": thread_id or f"{owner}/{repo}#{pr_index}"},
+    }
+
     # Use thread_id for checkpoint resumption if available
     if thread_id:
-        final_state = compiled.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})
+        final_state = compiled.invoke(initial_state, config=config)
     else:
-        final_state = compiled.invoke(initial_state)
+        final_state = compiled.invoke(initial_state, config=config)
+
+    # Post-execution trace enrichment
+    verdict = final_state.get("verdict")
+    if ctx.handler:
+        findings = final_state.get("_findings", [])
+        ctx.handler.langfuse_client.trace(id=ctx.handler.trace_id).update(
+            tags=["has-findings"] if findings else [],
+            metadata={
+                "dependency": final_state.get("dependency"),
+                "version_bump": f"{final_state.get('current_version')} → {final_state.get('new_version')}",
+                "verdict": verdict.decision if verdict else None,
+                "finding_count": len(findings),
+            },
+        )
+
     return final_state["verdict"]

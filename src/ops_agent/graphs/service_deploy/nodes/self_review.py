@@ -1,6 +1,7 @@
 """Node: self_review - checks generated manifests against conventions."""
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
+
+logger = logging.getLogger(__name__)
 
 _SELF_REVIEW_SYSTEM = """\
 You are a Kubernetes manifest reviewer. Check the generated manifests against
@@ -34,28 +37,35 @@ class ReviewResult(BaseModel):
 
 
 def self_review(state: ServiceDeployState) -> dict[str, Any]:
-    """Check generated manifests against conventions; structured output."""
-    manifests = state.get("manifests", {})
-    if not manifests:
-        return {"review_passed": False, "review_issues": ["No manifests were generated."]}
+    """Check generated manifests against conventions; structured output.
 
-    manifest_block = "\n\n".join(
-        f"### {fname}\n```yaml\n{content}\n```" for fname, content in manifests.items()
-    )
+    On failure, logs error and returns negative review to allow retries.
+    """
+    try:
+        manifests = state.get("manifests", {})
+        if not manifests:
+            return {"review_passed": False, "review_issues": ["No manifests were generated."]}
 
-    llm = get_llm("extract")
-    structured_llm = llm.with_structured_output(ReviewResult)
+        manifest_block = "\n\n".join(
+            f"### {fname}\n```yaml\n{content}\n```" for fname, content in manifests.items()
+        )
 
-    messages = [
-        SystemMessage(content=_SELF_REVIEW_SYSTEM),
-        HumanMessage(
-            content=(
-                f"Service spec: {json.dumps(state.get('spec', {}), indent=2)}\n\n"
-                f"Conventions:\n{state.get('conventions', '')}\n\n"
-                f"Generated manifests:\n{manifest_block}"
-            )
-        ),
-    ]
+        llm = get_llm("extract")
+        structured_llm = llm.with_structured_output(ReviewResult)
 
-    result: ReviewResult = structured_llm.invoke(messages)  # type: ignore[assignment]
-    return {"review_passed": result.passed, "review_issues": result.issues}
+        messages = [
+            SystemMessage(content=_SELF_REVIEW_SYSTEM),
+            HumanMessage(
+                content=(
+                    f"Service spec: {json.dumps(state.get('spec', {}), indent=2)}\n\n"
+                    f"Conventions:\n{state.get('conventions', '')}\n\n"
+                    f"Generated manifests:\n{manifest_block}"
+                )
+            ),
+        ]
+
+        result: ReviewResult = structured_llm.invoke(messages)  # type: ignore[assignment]
+        return {"review_passed": result.passed, "review_issues": result.issues}
+    except Exception as exc:
+        logger.error("self_review failed: %s", exc)
+        return {"review_passed": False, "review_issues": [f"Review failed: {exc}"]}

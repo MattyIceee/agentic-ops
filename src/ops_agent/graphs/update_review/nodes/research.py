@@ -1,6 +1,7 @@
 """Node: research - gathers evidence about dependency updates."""
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -12,6 +13,8 @@ from ops_agent.state import UpdateReviewState
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.search import get_search_tool
 from ops_agent.types import EvidenceItem
+
+logger = logging.getLogger(__name__)
 
 _RESEARCH_SYSTEM = """\
 You are a dependency-update researcher. Your job is to gather evidence about \
@@ -87,9 +90,5 @@ def research(state: UpdateReviewState) -> dict[str, Any]:
 
         return {"evidence": evidence}
     except Exception as exc:
-        import sys
-        print(
-            f"Warning: research node failed for {dep} {old_v} → {new_v}: {exc}",
-            file=sys.stderr,
-        )
+        logger.warning("research node failed for %s %s → %s: %s", dep, old_v, new_v, exc)
         return {"evidence": []}

@@ -1,6 +1,7 @@
 """CLI entry points for ops-agent: review-pr and scaffold subcommands."""
 
 import argparse
+import logging
 import sys
 
 
@@ -21,6 +22,7 @@ def _cmd_review_pr(args: argparse.Namespace) -> None:
     _require_settings()
 
     from ops_agent.graphs.update_review import run
+    from ops_agent.tracing import flush_langfuse
     from ops_agent.types import Verdict
 
     try:
@@ -28,6 +30,8 @@ def _cmd_review_pr(args: argparse.Namespace) -> None:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        flush_langfuse()
 
     print(f"\nDecision: {verdict.decision}")
     print(f"Summary:  {verdict.summary}")
@@ -71,6 +75,7 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
         prompt = args.prompt
 
     from ops_agent.graphs.service_deploy import run
+    from ops_agent.tracing import flush_langfuse
 
     # Pass issue number if available for linking in PR
     issue_number = getattr(args, 'issue', None) if hasattr(args, 'issue') else None
@@ -87,6 +92,8 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        flush_langfuse()
 
     if pr_url:
         print(f"\nPR opened: {pr_url}")
@@ -96,6 +103,11 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """Entry point for the ops-agent CLI."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s [%(name)s] %(message)s",
+    )
+
     parser = argparse.ArgumentParser(
         prog="ops-agent",
         description="Agentic ops pipeline: Renovate PR review and deployment scaffolding.",
