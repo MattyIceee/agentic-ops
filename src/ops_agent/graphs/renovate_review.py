@@ -106,6 +106,13 @@ def ingest_pr(state: RenovateReviewState) -> dict[str, Any]:
     finally:
         client.close()
 
+    # Extract last commit ID from PR to use as checkpoint key.
+    # If commits list is missing, fall back to PR index.
+    commits = pr.get("commits") or []
+    last_commit_id = commits[-1].get("id") if commits else None
+    if not last_commit_id:
+        last_commit_id = f"{owner}/{repo}#{index}"
+
     title: str = pr.get("title", "")
     body: str = pr.get("body", "") or ""
 
@@ -135,6 +142,7 @@ def ingest_pr(state: RenovateReviewState) -> dict[str, Any]:
         "new_version": new_version,
         "diff": diff,
         "renovate_rating": renovate_rating,
+        "thread_id": last_commit_id,
     }
 
 
@@ -166,53 +174,64 @@ Do NOT speculate — only report what you actually retrieved.
 
 
 def research(state: RenovateReviewState) -> dict[str, Any]:
-    """Tool-calling agent that gathers changelog/release-note evidence."""
+    """Tool-calling agent that gathers changelog/release-note evidence.
+
+    On failure, logs error and returns empty evidence to allow downstream nodes to proceed.
+    """
     dep = state["dependency"]
     old_v = state.get("current_version") or "unknown"
     new_v = state.get("new_version") or "unknown"
 
-    llm = get_llm("research")
-    tools = [get_search_tool(), get_fetch_tool()]
-
-    agent = create_react_agent(llm, tools, prompt=_RESEARCH_SYSTEM)
-
-    user_msg = (
-        f"Research the version bump: {dep} {old_v} → {new_v}.\n"
-        f"Diff preview (first 2000 chars):\n{state.get('diff', '')[:2000]}\n\n"
-        "Find and retrieve changelogs, release notes, and migration docs. "
-        "Return a JSON list of objects with keys: source, url, text."
-    )
-
-    result = agent.invoke({"messages": [HumanMessage(content=user_msg)]})
-    last_msg = result["messages"][-1]
-    output: str = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-
-    # Parse evidence items from agent output (best-effort JSON extraction).
-    evidence: list[EvidenceItem] = []
     try:
-        import json
+        llm = get_llm("research")
+        tools = [get_search_tool(), get_fetch_tool()]
 
-        # Look for a JSON array anywhere in the output.
-        json_match = re.search(r"\[.*\]", output, re.DOTALL)
-        if json_match:
-            items = json.loads(json_match.group(0))
-            for item in items:
-                if isinstance(item, dict) and "text" in item:
-                    evidence.append(
-                        EvidenceItem(
-                            source=item.get("source", "web"),
-                            url=item.get("url"),
-                            text=str(item["text"]),
+        agent = create_react_agent(llm, tools, prompt=_RESEARCH_SYSTEM)
+
+        user_msg = (
+            f"Research the version bump: {dep} {old_v} → {new_v}.\n"
+            f"Diff preview (first 2000 chars):\n{state.get('diff', '')[:2000]}\n\n"
+            "Find and retrieve changelogs, release notes, and migration docs. "
+            "Return a JSON list of objects with keys: source, url, text."
+        )
+
+        result = agent.invoke({"messages": [HumanMessage(content=user_msg)]})
+        last_msg = result["messages"][-1]
+        output: str = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+        # Parse evidence items from agent output (best-effort JSON extraction).
+        evidence: list[EvidenceItem] = []
+        try:
+            import json
+
+            # Look for a JSON array anywhere in the output.
+            json_match = re.search(r"\[.*\]", output, re.DOTALL)
+            if json_match:
+                items = json.loads(json_match.group(0))
+                for item in items:
+                    if isinstance(item, dict) and "text" in item:
+                        evidence.append(
+                            EvidenceItem(
+                                source=item.get("source", "web"),
+                                url=item.get("url"),
+                                text=str(item["text"]),
+                            )
                         )
-                    )
-    except Exception:
-        # If parsing fails, store the raw output as a single evidence item.
-        if output.strip():
-            evidence.append(
-                EvidenceItem(source="agent_output", url=None, text=output[:4000])
-            )
+        except Exception:
+            # If parsing fails, store the raw output as a single evidence item.
+            if output.strip():
+                evidence.append(
+                    EvidenceItem(source="agent_output", url=None, text=output[:4000])
+                )
 
-    return {"evidence": evidence}
+        return {"evidence": evidence}
+    except Exception as exc:
+        import sys
+        print(
+            f"Warning: research node failed for {dep} {old_v} → {new_v}: {exc}",
+            file=sys.stderr,
+        )
+        return {"evidence": []}
 
 
 # ---------------------------------------------------------------------------
@@ -242,36 +261,47 @@ Rules:
 
 
 def extract_breaking_changes(state: RenovateReviewState) -> dict[str, Any]:
-    """Structured extraction of breaking changes from gathered evidence."""
-    evidence = state.get("evidence", [])
-    if not evidence:
+    """Structured extraction of breaking changes from gathered evidence.
+
+    On failure, logs error and returns empty findings to allow downstream nodes to proceed.
+    """
+    try:
+        evidence = state.get("evidence", [])
+        if not evidence:
+            return {}
+
+        evidence_block = "\n\n---\n\n".join(
+            f"[{e.source}] {e.url or ''}\n{e.text}" for e in evidence
+        )
+
+        llm = get_llm("extract")
+        structured_llm = llm.with_structured_output(Findings)
+
+        messages = [
+            SystemMessage(content=_EXTRACT_SYSTEM),
+            HumanMessage(
+                content=(
+                    f"Dependency: {state['dependency']} "
+                    f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
+                    f"Evidence:\n{evidence_block}\n\n"
+                    "Return a list of findings. Each must have claim, source, and quote."
+                )
+            ),
+        ]
+
+        result: Findings = structured_llm.invoke(messages)  # type: ignore[assignment]
+        findings: list[Finding] = result.findings if result else []
+        # Filter out any findings that somehow have an empty quote (defensive).
+        findings = [f for f in (findings or []) if f.quote.strip()]
+
+        return {"_findings": findings}
+    except Exception as exc:
+        import sys
+        print(
+            f"Warning: extract_breaking_changes failed for {state['dependency']}: {exc}",
+            file=sys.stderr,
+        )
         return {}
-
-    evidence_block = "\n\n---\n\n".join(
-        f"[{e.source}] {e.url or ''}\n{e.text}" for e in evidence
-    )
-
-    llm = get_llm("extract")
-    structured_llm = llm.with_structured_output(Findings)
-
-    messages = [
-        SystemMessage(content=_EXTRACT_SYSTEM),
-        HumanMessage(
-            content=(
-                f"Dependency: {state['dependency']} "
-                f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
-                f"Evidence:\n{evidence_block}\n\n"
-                "Return a list of findings. Each must have claim, source, and quote."
-            )
-        ),
-    ]
-
-    result: Findings = structured_llm.invoke(messages)  # type: ignore[assignment]
-    findings: list[Finding] = result.findings if result else []
-    # Filter out any findings that somehow have an empty quote (defensive).
-    findings = [f for f in (findings or []) if f.quote.strip()]
-
-    return {"_findings": findings}
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +651,11 @@ def build_renovate_graph() -> Any:
     The graph is linear:
       ingest_pr → research → extract_breaking_changes → assess_risk
         → assemble_verdict → post_review → END
+
+    Compiled with checkpointing support if PostgreSQL is available.
     """
+    from ops_agent.checkpointing import get_checkpoint_saver
+
     graph = StateGraph(RenovateReviewState)
 
     graph.add_node("ingest_pr", ingest_pr)
@@ -639,6 +673,9 @@ def build_renovate_graph() -> Any:
     graph.add_edge("assemble_verdict", "post_review")
     graph.add_edge("post_review", END)
 
+    checkpointer = get_checkpoint_saver()
+    if checkpointer:
+        return graph.compile(checkpointer=checkpointer)
     return graph.compile()
 
 
@@ -647,8 +684,11 @@ def build_renovate_graph() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def run(pr_index: int, owner: str, repo: str) -> Verdict:
+def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> Verdict:
     """Run the full Renovate review graph for a single PR.
+
+    If thread_id is provided, the graph will resume from checkpoint if it exists.
+    Otherwise, a fresh run is performed.
 
     Returns the Verdict from the final state.
     """
@@ -657,6 +697,7 @@ def run(pr_index: int, owner: str, repo: str) -> Verdict:
         "pr_index": pr_index,
         "_owner": owner,
         "_repo": repo,
+        "thread_id": thread_id or f"{owner}/{repo}#{pr_index}",
         "dependency": "",
         "current_version": "",
         "new_version": "",
@@ -668,5 +709,9 @@ def run(pr_index: int, owner: str, repo: str) -> Verdict:
         "verdict": None,
         "posted": False,
     }
-    final_state = compiled.invoke(initial_state)
+    # Use thread_id for checkpoint resumption if available
+    if thread_id:
+        final_state = compiled.invoke(initial_state, config={"configurable": {"thread_id": thread_id}})
+    else:
+        final_state = compiled.invoke(initial_state)
     return final_state["verdict"]

@@ -74,8 +74,16 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
 
     # Pass issue number if available for linking in PR
     issue_number = getattr(args, 'issue', None) if hasattr(args, 'issue') else None
+    checkpoint_id = getattr(args, 'id', None) if hasattr(args, 'id') else None
+
     try:
-        pr_url: str | None = run(prompt=prompt, issue_number=issue_number)
+        pr_url: str | None = run(
+            prompt=prompt,
+            issue_number=issue_number,
+            id=checkpoint_id,
+            owner=args.owner or "",
+            repo=args.repo or "",
+        )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -125,6 +133,11 @@ def main() -> None:
     )
     scaffold_p.add_argument("--owner", metavar="OWNER", help="Gitea repo owner (required with --issue)")
     scaffold_p.add_argument("--repo", metavar="REPO", help="Gitea repo name (required with --issue)")
+    scaffold_p.add_argument(
+        "--id",
+        metavar="ID",
+        help="Checkpoint ID for resuming from a previous run (use with --prompt or --prompt-file)",
+    )
     scaffold_p.set_defaults(func=_cmd_scaffold)
 
     args = parser.parse_args()

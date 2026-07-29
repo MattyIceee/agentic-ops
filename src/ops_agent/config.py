@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     # HTTP behaviour
     request_timeout_seconds: int = 120
 
+    # Checkpointing (PostgreSQL) — optional
+    checkpoint_enabled: bool = True
+    checkpoint_db_host: str = "localhost"
+    checkpoint_db_port: int = 5432
+    checkpoint_db_user: str = "ops_agent"
+    checkpoint_db_password: str = "ops_agent_dev_password"
+    checkpoint_db_name: str = "ops_agent_checkpoints"
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

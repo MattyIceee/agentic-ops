@@ -104,3 +104,6 @@ class DeployScaffoldState(TypedDict):
     review_issues: list[str]
     retry_count: int
     pr_url: str | None
+    _owner: str  # Internal: Gitea repo owner (optional)
+    _repo: str  # Internal: Gitea repo name (optional)
+    issue_number: int | None  # Internal: issue number if provided

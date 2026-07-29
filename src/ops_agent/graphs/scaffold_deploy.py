@@ -642,7 +642,11 @@ def build_scaffold_graph() -> Any:
       → (helm?) → generate_helmrelease / generate_kustomize
       → self_review → (passed? retries?) → commit_and_pr / retry generate
       → END
+
+    Compiled with checkpointing support if PostgreSQL is available.
     """
+    from ops_agent.checkpointing import get_checkpoint_saver
+
     graph = StateGraph(DeployScaffoldState)
 
     graph.add_node("parse_request", parse_request)
@@ -683,6 +687,9 @@ def build_scaffold_graph() -> Any:
 
     graph.add_edge("commit_and_pr", END)
 
+    checkpointer = get_checkpoint_saver()
+    if checkpointer:
+        return graph.compile(checkpointer=checkpointer)
     return graph.compile()
 
 
@@ -691,14 +698,44 @@ def build_scaffold_graph() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def run(prompt: str, owner: str = "", repo: str = "", issue_number: int | None = None) -> str | None:
+def run(
+    prompt: str,
+    owner: str = "",
+    repo: str = "",
+    issue_number: int | None = None,
+    id: str | None = None,
+    thread_id: str | None = None,
+) -> str | None:
     """Run the full scaffold graph for a deployment request.
+
+    If thread_id is provided, the graph will resume from checkpoint if it exists.
+    Otherwise, a fresh run is performed.
+
+    Args:
+        prompt: Deployment request text
+        owner: Optional Gitea repo owner
+        repo: Optional Gitea repo name
+        issue_number: Optional issue number to link
+        id: Optional explicit checkpoint ID (required if using prompt/prompt_file without issue)
+        thread_id: Optional explicit thread ID for checkpointing
 
     Returns the PR URL from the final state, or None if not set.
     """
     compiled = build_scaffold_graph()
+
+    # Determine the checkpoint thread_id
+    if thread_id:
+        checkpoint_id = thread_id
+    elif issue_number:
+        checkpoint_id = f"issue_{issue_number}"
+    elif id:
+        checkpoint_id = id
+    else:
+        checkpoint_id = "scaffold_deploy_no_id"
+
     initial_state: dict[str, Any] = {
         "request": prompt,
+        "thread_id": checkpoint_id,
         "provided_links": [],
         "spec": {},
         "service_evidence": [],
@@ -714,5 +751,10 @@ def run(prompt: str, owner: str = "", repo: str = "", issue_number: int | None =
         "_repo": repo,
         "issue_number": issue_number,
     }
-    final_state = compiled.invoke(initial_state)
+
+    # Use thread_id for checkpoint resumption if available
+    if checkpoint_id and checkpoint_id != "scaffold_deploy_no_id":
+        final_state = compiled.invoke(initial_state, config={"configurable": {"thread_id": checkpoint_id}})
+    else:
+        final_state = compiled.invoke(initial_state)
     return final_state.get("pr_url")
