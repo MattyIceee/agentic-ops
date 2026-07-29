@@ -121,15 +121,14 @@ def run(
 ) -> str | None:
     """Run the full scaffold graph for a deployment request.
 
-    If thread_id is provided, the graph will resume from checkpoint if it exists.
-    Otherwise, a fresh run is performed.
+    Resumes from checkpoint if one exists for the thread_id, otherwise starts fresh.
 
     Args:
         prompt: Deployment request text
         owner: Optional Gitea repo owner
         repo: Optional Gitea repo name
         issue_number: Optional issue number to link
-        id: Optional explicit checkpoint ID (required if using prompt/prompt_file without issue)
+        id: Optional explicit checkpoint ID for resuming
         thread_id: Optional explicit thread ID for checkpointing
 
     Returns the PR URL from the final state, or None if not set.
@@ -189,26 +188,28 @@ def run(
         "configurable": {"thread_id": checkpoint_id},
     }
 
-    # Use thread_id for checkpoint resumption if available
-    if checkpoint_id and checkpoint_id != "scaffold_deploy_no_id":
-        final_state = compiled.invoke(initial_state, config=config)
-    else:
-        final_state = compiled.invoke(initial_state, config=config)
+    try:
+        state = compiled.get_state(config)
+        logger.debug("Checkpoint state: values=%s, next=%s", state.values is not None, state.next)
 
-    # Post-execution trace enrichment
-    if ctx.handler:
-        manifest_type = "helm" if final_state.get("helm_chart_found") else "kustomize"
-        tags_update = ["manifest:" + manifest_type]
-        if final_state.get("retry_count", 0) > 0:
-            tags_update.append("review-retried")
+        if state.values and not state.next:
+            # Checkpoint exists, no pending nodes -> already finished
+            logger.debug("Resuming from completed checkpoint (thread_id=%s)", checkpoint_id)
+            final_state = state.values
+        elif state.next:
+            # Checkpoint exists with pending nodes -> resume
+            logger.debug("Resuming from checkpoint (thread_id=%s) at nodes: %s", checkpoint_id, state.next)
+            final_state = compiled.invoke(None, config)
+        else:
+            # No checkpoint -> fresh run
+            logger.debug("Starting fresh execution (thread_id=%s)", checkpoint_id)
+            final_state = compiled.invoke(initial_state, config)
+    except Exception as e:
+        logger.error("Graph execution failed: %s", e, exc_info=True)
+        raise
 
-        ctx.handler.langfuse_client.trace(id=ctx.handler.trace_id).update(
-            tags=tags_update,
-            metadata={
-                "manifest_type": manifest_type,
-                "retry_count": final_state.get("retry_count", 0),
-                "pr_url": final_state.get("pr_url"),
-            },
-        )
+    if final_state is None:
+        logger.error("No final state returned from graph")
+        return None
 
     return final_state.get("pr_url")

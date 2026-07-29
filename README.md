@@ -146,6 +146,52 @@ On a fresh checkout this prints `no eval data yet` and exits 0. To add labeled e
 
 ---
 
+## Langfuse Tracing (Local Development)
+
+Langfuse v3 provides distributed tracing for graph executions. A full Docker stack is included for local testing.
+
+### Start the stack
+
+```bash
+docker compose down -v  # Clean start
+docker compose up -d
+```
+
+All services will be healthy in ~30 seconds:
+- **Langfuse Web UI**: http://localhost:3000
+- **MinIO S3 console**: http://localhost:9001
+
+### Default credentials
+
+| Service | Username | Password |
+|---------|----------|----------|
+| Langfuse | `dev@localhost` | `changeme` |
+| MinIO | `minioadmin` | `minioadmin` |
+
+### Enable tracing in ops-agent
+
+Update `.env`:
+```
+LANGFUSE_ENABLED=true
+LANGFUSE_SECRET_KEY=sk-lf-dev-test-key-12345678901234567890ab
+LANGFUSE_PUBLIC_KEY=pk-lf-dev-test-key-12345678901234567890ab
+LANGFUSE_BASE_URL=http://localhost:3000
+```
+
+### Run a traced execution
+
+```bash
+uv run ops-agent review-pr --owner test --repo test --pr 1
+```
+
+Traces will appear in Langfuse Web UI with:
+- Trace name: `update-review/test/test#1`
+- Tags: `graph:update-review`, `has-findings` (if applicable)
+- Metadata: dependency, version bump, verdict, finding count
+- Spans: one per node, with LLM latency visible
+
+---
+
 ## Development
 
 ```bash

@@ -72,8 +72,7 @@ def build_graph() -> Any:
 def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> Verdict:
     """Run the full update review graph for a single PR.
 
-    If thread_id is provided, the graph will resume from checkpoint if it exists.
-    Otherwise, a fresh run is performed.
+    Resumes from checkpoint if one exists for the thread_id, otherwise starts fresh.
 
     Returns the Verdict from the final state.
     """
@@ -87,11 +86,13 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
     )
 
     compiled = build_graph()
+    thread_id = thread_id or f"{owner}/{repo}#{pr_index}"
+
     initial_state: dict[str, Any] = {
         "pr_index": pr_index,
         "_owner": owner,
         "_repo": repo,
-        "thread_id": thread_id or f"{owner}/{repo}#{pr_index}",
+        "thread_id": thread_id,
         "dependency": "",
         "current_version": "",
         "new_version": "",
@@ -107,27 +108,31 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
     callbacks = [ctx.handler] if ctx.handler else []
     config = {
         "callbacks": callbacks,
-        "configurable": {"thread_id": thread_id or f"{owner}/{repo}#{pr_index}"},
+        "configurable": {"thread_id": thread_id},
     }
 
-    # Use thread_id for checkpoint resumption if available
-    if thread_id:
-        final_state = compiled.invoke(initial_state, config=config)
-    else:
-        final_state = compiled.invoke(initial_state, config=config)
+    try:
+        state = compiled.get_state(config)
+        logger.debug("Checkpoint state: values=%s, next=%s", state.values is not None, state.next)
 
-    # Post-execution trace enrichment
-    verdict = final_state.get("verdict")
-    if ctx.handler:
-        findings = final_state.get("_findings", [])
-        ctx.handler.langfuse_client.trace(id=ctx.handler.trace_id).update(
-            tags=["has-findings"] if findings else [],
-            metadata={
-                "dependency": final_state.get("dependency"),
-                "version_bump": f"{final_state.get('current_version')} → {final_state.get('new_version')}",
-                "verdict": verdict.decision if verdict else None,
-                "finding_count": len(findings),
-            },
-        )
+        if state.values and not state.next:
+            # Checkpoint exists, no pending nodes -> already finished
+            logger.debug("Resuming from completed checkpoint (thread_id=%s)", thread_id)
+            final_state = state.values
+        elif state.next:
+            # Checkpoint exists with pending nodes -> resume
+            logger.debug("Resuming from checkpoint (thread_id=%s) at nodes: %s", thread_id, state.next)
+            final_state = compiled.invoke(None, config)
+        else:
+            # No checkpoint -> fresh run
+            logger.debug("Starting fresh execution (thread_id=%s)", thread_id)
+            final_state = compiled.invoke(initial_state, config)
+    except Exception as e:
+        logger.error("Graph execution failed: %s", e, exc_info=True)
+        raise
 
-    return final_state["verdict"]
+    if final_state is None:
+        logger.error("No final state returned from graph")
+        return None
+
+    return final_state.get("verdict")

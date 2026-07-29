@@ -42,17 +42,10 @@ def get_langfuse_handler(
     if not settings.langfuse_enabled:
         return TraceContext(trace_id=trace_name, handler=None)
 
-    from langfuse.callback import CallbackHandler
+    from langfuse.langchain import CallbackHandler
 
     trace_id = str(uuid.uuid4())
-    handler = CallbackHandler(
-        secret_key=settings.langfuse_secret_key,
-        public_key=settings.langfuse_public_key,
-        host=settings.langfuse_base_url,
-        trace_name=trace_name,
-        tags=tags or [],
-        metadata=metadata or {},
-    )
+    handler = CallbackHandler()
     logger.debug("Initialized Langfuse trace: %s (id=%s)", trace_name, trace_id)
     return TraceContext(trace_id=trace_id, handler=handler)
 

@@ -1,9 +1,20 @@
 """Checkpointing infrastructure for LangGraph using PostgreSQL."""
 
 import functools
+import logging
 import os
 
+import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_MSGPACK_MODULES = [
+    ("ops_agent.types.findings", "RiskAssessment"),
+    ("ops_agent.types.findings", "Verdict"),
+    ("ops_agent.types.evidence", "EvidenceItem"),
+]
 
 
 @functools.lru_cache(maxsize=1)
@@ -20,13 +31,20 @@ def get_checkpoint_saver() -> PostgresSaver:
     Returns None if checkpointing is disabled via CHECKPOINT_ENABLED=false.
     """
     if os.getenv("CHECKPOINT_ENABLED", "true").lower() == "false":
+        logger.debug("Checkpointing disabled via CHECKPOINT_ENABLED=false")
         return None  # type: ignore[return-value]
 
-    conn_str = (
-        f"postgresql://{os.getenv('CHECKPOINT_DB_USER', 'ops_agent')}:"
-        f"{os.getenv('CHECKPOINT_DB_PASSWORD', 'ops_agent_dev_password')}@"
-        f"{os.getenv('CHECKPOINT_DB_HOST', 'localhost')}:"
-        f"{os.getenv('CHECKPOINT_DB_PORT', '5432')}/"
-        f"{os.getenv('CHECKPOINT_DB_NAME', 'ops_agent_checkpoints')}"
+    conn = psycopg.connect(
+        host=os.getenv("CHECKPOINT_DB_HOST", "localhost"),
+        port=int(os.getenv("CHECKPOINT_DB_PORT", "5432")),
+        user=os.getenv("CHECKPOINT_DB_USER", "ops_agent"),
+        password=os.getenv("CHECKPOINT_DB_PASSWORD", "ops_agent_dev_password"),
+        dbname=os.getenv("CHECKPOINT_DB_NAME", "ops_agent_checkpoints"),
+        autocommit=True,
     )
-    return PostgresSaver(conn_str)
+    logger.debug("Connected to checkpoint database")
+    serde = JsonPlusSerializer(allowed_msgpack_modules=ALLOWED_MSGPACK_MODULES)
+    saver = PostgresSaver(conn, serde=serde)
+    saver.setup()
+    logger.debug("PostgreSQL checkpoint saver initialized")
+    return saver

@@ -2,7 +2,10 @@
 
 import argparse
 import logging
+import os
 import sys
+
+from dotenv import load_dotenv
 
 
 def _require_settings() -> None:
@@ -103,8 +106,10 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """Entry point for the ops-agent CLI."""
+    load_dotenv()
+    log_level = logging.DEBUG if os.getenv("DEBUG") else logging.INFO
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(levelname)s [%(name)s] %(message)s",
     )
 
