@@ -15,7 +15,9 @@ You are a Flux HelmRelease generator. Generate Kubernetes manifests to deploy a
 service using a Flux HelmRelease and a values.yaml override file.
 
 Follow the conventions provided. Use the service evidence for image tag, ports,
-env variables, and volume details. Return ONLY valid YAML — no prose.
+env variables, and volume details. Deploy into the namespace given in the spec's
+"namespace" field — set it on every namespaced resource. Never use "default".
+Return ONLY valid YAML — no prose.
 
 Output a JSON object mapping filename → file content:
 {

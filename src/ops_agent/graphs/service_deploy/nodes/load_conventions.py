@@ -2,9 +2,11 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
+import yaml
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ops_agent.config import get_settings
@@ -27,6 +29,52 @@ repository, summarize the conventions used so a code generator can follow them. 
 Be concise — this summary will be passed to a code generator.
 """
 
+# Namespaces that exist but are almost never the right target for a new app.
+_SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease"}
+
+_NAMESPACE_FIELD_RE = re.compile(r"^\s*namespace:\s*[\"']?([a-z0-9][a-z0-9-]*)[\"']?\s*$", re.MULTILINE)
+
+
+def _scan_namespaces(repo_dir: Path) -> list[str]:
+    """Collect namespaces referenced across the repo's YAML manifests.
+
+    Gathers names from `kind: Namespace` resources and from `namespace:` fields.
+    Files with template syntax (Helm/Flux) that fail to parse fall back to a
+    regex scan so we still catch plain `namespace:` references.
+    """
+    found: set[str] = set()
+
+    for root, dirs, files in os.walk(repo_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules",)]
+        for fname in files:
+            if not fname.endswith((".yaml", ".yml")):
+                continue
+            try:
+                text = (Path(root) / fname).read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            parsed = False
+            try:
+                for doc in yaml.safe_load_all(text):
+                    parsed = True
+                    if not isinstance(doc, dict):
+                        continue
+                    if doc.get("kind") == "Namespace":
+                        name = (doc.get("metadata") or {}).get("name")
+                        if isinstance(name, str):
+                            found.add(name)
+                    meta_ns = (doc.get("metadata") or {}).get("namespace")
+                    if isinstance(meta_ns, str):
+                        found.add(meta_ns)
+            except yaml.YAMLError:
+                parsed = False
+
+            if not parsed:
+                found.update(_NAMESPACE_FIELD_RE.findall(text))
+
+    return sorted(ns for ns in found if ns and ns not in _SYSTEM_NAMESPACES)
+
 
 def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
     """Clone target repo and analyze its conventions."""
@@ -38,7 +86,8 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
     if not owner or not repo_name:
         logger.warning("No _owner/_repo in state; using generic conventions")
         return {
-            "conventions": "Use standard Kubernetes/Flux GitOps conventions: apps directory structure, HelmRelease CRDs, Kustomize overlays, and standard labeling patterns."
+            "conventions": "Use standard Kubernetes/Flux GitOps conventions: apps directory structure, HelmRelease CRDs, Kustomize overlays, and standard labeling patterns.",
+            "existing_namespaces": [],
         }
 
     try:
@@ -51,7 +100,7 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
         )
     except Exception as exc:
         logger.error("Failed to clone repo %s/%s: %s", owner, repo_name, exc)
-        return {"conventions": f"Failed to clone repo: {exc}"}
+        return {"conventions": f"Failed to clone repo: {exc}", "existing_namespaces": []}
 
     structure_lines: list[str] = []
     sample_files: dict[str, str] = {}
@@ -93,5 +142,13 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
 
     response = llm.invoke(messages)
     conventions: str = response.content if hasattr(response, "content") else str(response)
-    logger.info("Extracted conventions from %s/%s", owner, repo_name)
-    return {"conventions": conventions}
+
+    existing_namespaces = _scan_namespaces(repo_dir)
+    logger.info(
+        "Extracted conventions from %s/%s; found %d namespace(s): %s",
+        owner,
+        repo_name,
+        len(existing_namespaces),
+        existing_namespaces,
+    )
+    return {"conventions": conventions, "existing_namespaces": existing_namespaces}

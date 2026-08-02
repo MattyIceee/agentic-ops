@@ -16,7 +16,9 @@ service using plain Kustomize (no Helm). Include a Deployment, Service, and
 kustomization.yaml.
 
 Follow the conventions provided. Use the service evidence for image, ports, env
-variables, and volume details. Return ONLY valid YAML — no prose.
+variables, and volume details. Deploy into the namespace given in the spec's
+"namespace" field — set it on every namespaced resource (and the kustomization's
+`namespace:`). Never use "default". Return ONLY valid YAML — no prose.
 
 Output a JSON object mapping filename → file content:
 {

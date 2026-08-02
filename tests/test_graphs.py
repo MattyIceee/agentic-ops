@@ -203,6 +203,7 @@ _SCAFFOLD_INITIAL: dict = {
     "helm_chart_found": False,
     "helm_chart_ref": None,
     "conventions": "",
+    "existing_namespaces": [],
     "manifests": {},
     "review_passed": False,
     "review_issues": [],
@@ -212,13 +213,17 @@ _SCAFFOLD_INITIAL: dict = {
 
 _BASE_STUBS = {
     "parse_request": lambda s: {
-        "spec": {"name": "myapp", "namespace": "default", "ports": [8080]},
+        "spec": {"name": "myapp", "namespace": None, "ports": [8080]},
         "provided_links": [],
     },
     "research_service": lambda s: {
         "service_evidence": [EvidenceItem(source="docs", url=None, text="image: myapp:latest")],
     },
-    "load_conventions": lambda s: {"conventions": "apps/<name>/ layout"},
+    "load_conventions": lambda s: {
+        "conventions": "apps/<name>/ layout",
+        "existing_namespaces": ["media", "monitoring"],
+    },
+    "decide_namespace": lambda s: {"spec": {**s.get("spec", {}), "namespace": "myapp"}},
     "commit_and_pr": lambda s: {"pr_url": "https://gitea.test/myorg/myrepo/pulls/1"},
 }
 
@@ -330,6 +335,61 @@ def test_scaffold_graph_self_review_retry_loop(monkeypatch):
     assert len(review_calls) == 2, "self_review should be called twice"
     assert result["retry_count"] == 1
     assert result["pr_url"] == "https://gitea.test/myorg/myrepo/pulls/1"
+
+
+# ─────────────────────── decide_namespace unit tests ───────────────────────
+
+
+def test_decide_namespace_honors_user_choice(monkeypatch):
+    """An explicit, non-system user namespace is kept without calling the LLM."""
+    from ops_agent.graphs.service_deploy.nodes import decide_namespace as dn
+
+    def _boom(*_a, **_k):
+        raise AssertionError("LLM should not be called when user specified a namespace")
+
+    monkeypatch.setattr(dn, "get_llm", _boom)
+
+    result = dn.decide_namespace({
+        "spec": {"name": "myapp", "namespace": "media"},
+        "existing_namespaces": ["media"],
+    })
+    assert result["spec"]["namespace"] == "media"
+
+
+def test_decide_namespace_rejects_user_default(monkeypatch):
+    """A user 'default' is treated as unset and re-decided (never lands in default)."""
+    from ops_agent.graphs.service_deploy.nodes import decide_namespace as dn
+
+    monkeypatch.setattr(dn, "get_llm", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    result = dn.decide_namespace({
+        "spec": {"name": "myapp", "namespace": "default"},
+        "existing_namespaces": [],
+    })
+    assert result["spec"]["namespace"] == "myapp"  # guardrail → service name
+
+
+def test_decide_namespace_falls_back_to_service_name_on_llm_failure(monkeypatch):
+    """When the LLM step fails and no namespace is set, fall back to the service name."""
+    from ops_agent.graphs.service_deploy.nodes import decide_namespace as dn
+
+    monkeypatch.setattr(dn, "get_llm", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    result = dn.decide_namespace({
+        "spec": {"name": "grafana", "namespace": None},
+        "existing_namespaces": ["media"],
+    })
+    assert result["spec"]["namespace"] == "grafana"
+
+
+def test_decide_namespace_sanitize_rejects_system_namespaces():
+    from ops_agent.graphs.service_deploy.nodes.decide_namespace import _sanitize
+
+    assert _sanitize("default") is None
+    assert _sanitize("KUBE-SYSTEM") is None
+    assert _sanitize("  Media  ") == "media"
+    assert _sanitize(None) is None
+    assert _sanitize("") is None
 
 
 # ─────────────────────── version-analysis unit tests ───────────────────────

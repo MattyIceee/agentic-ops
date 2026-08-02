@@ -44,6 +44,7 @@ class ServiceDeployState(TypedDict):
     helm_chart_found: bool
     helm_chart_ref: str | None
     conventions: str
+    existing_namespaces: list[str]  # Namespaces discovered in the target repo
     manifests: dict[str, str]
     review_passed: bool
     review_issues: list[str]

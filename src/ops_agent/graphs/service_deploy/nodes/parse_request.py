@@ -18,7 +18,9 @@ deploy, extract a structured specification and any URLs the user provided.
 Return a ServiceSpec with:
 - name: service name (lowercase, hyphen-separated, no spaces)
 - image: docker image reference if explicitly mentioned, else null
-- namespace: kubernetes namespace (default: "default")
+- namespace: the kubernetes namespace ONLY if the user explicitly names one;
+  otherwise leave it null. Do NOT guess or fall back to "default" — a later step
+  chooses the namespace from the target repo's actual conventions.
 - ports: list of integer port numbers the service exposes
 - env: dict of environment variable names to values or descriptions
 - volumes: list of volume mount paths or descriptions
@@ -31,7 +33,7 @@ class ServiceSpec(BaseModel):
 
     name: str
     image: str | None = None
-    namespace: str = "default"
+    namespace: str | None = None
     ports: list[int] = []
     env: dict[str, str] = {}
     volumes: list[str] = []
@@ -60,6 +62,6 @@ def parse_request(state: ServiceDeployState) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("parse_request failed: %s", exc)
         return {
-            "spec": {"name": "unknown", "namespace": "default", "ports": [], "env": {}, "volumes": []},
+            "spec": {"name": "unknown", "namespace": None, "ports": [], "env": {}, "volumes": []},
             "provided_links": [],
         }

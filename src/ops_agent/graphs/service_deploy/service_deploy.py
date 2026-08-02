@@ -2,7 +2,7 @@
 
 Edges:
   parse_request → research_service → assess_helm → load_conventions
-  → (route_helm) → generate_helmrelease / generate_kustomize
+  → decide_namespace → (route_helm) → generate_helmrelease / generate_kustomize
   → self_review → (route_review) → commit_and_pr / retry generate node
   → END
 
@@ -19,6 +19,7 @@ from langgraph.graph import END, StateGraph
 
 from ops_agent.graphs.service_deploy.nodes.assess_helm import assess_helm
 from ops_agent.graphs.service_deploy.nodes.commit_and_pr import commit_and_pr
+from ops_agent.graphs.service_deploy.nodes.decide_namespace import decide_namespace
 from ops_agent.graphs.service_deploy.nodes.generate_helmrelease import generate_helmrelease
 from ops_agent.graphs.service_deploy.nodes.generate_kustomize import generate_kustomize
 from ops_agent.graphs.service_deploy.nodes.load_conventions import load_conventions
@@ -57,7 +58,7 @@ def build_graph() -> Any:
 
     Topology:
       parse_request → research_service → assess_helm → load_conventions
-      → (helm?) → generate_helmrelease / generate_kustomize
+      → decide_namespace → (helm?) → generate_helmrelease / generate_kustomize
       → self_review → (passed? retries?) → commit_and_pr / retry generate
       → END
 
@@ -71,6 +72,7 @@ def build_graph() -> Any:
     graph.add_node("research_service", research_service)
     graph.add_node("assess_helm", assess_helm)
     graph.add_node("load_conventions", load_conventions)
+    graph.add_node("decide_namespace", decide_namespace)
     graph.add_node("generate_helmrelease", generate_helmrelease)
     graph.add_node("generate_kustomize", generate_kustomize)
     graph.add_node("self_review", self_review)
@@ -80,9 +82,10 @@ def build_graph() -> Any:
     graph.add_edge("parse_request", "research_service")
     graph.add_edge("research_service", "assess_helm")
     graph.add_edge("assess_helm", "load_conventions")
+    graph.add_edge("load_conventions", "decide_namespace")
 
     graph.add_conditional_edges(
-        "load_conventions",
+        "decide_namespace",
         _route_after_conventions,
         {
             "generate_helmrelease": "generate_helmrelease",
@@ -180,6 +183,7 @@ def run(
         "helm_chart_found": False,
         "helm_chart_ref": None,
         "conventions": "",
+        "existing_namespaces": [],
         "manifests": {},
         "review_passed": False,
         "review_issues": [],
