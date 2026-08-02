@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from ops_agent.graphs.interactive import steer_block as _steer_block
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
 from ops_agent.types import EvidenceItem
@@ -55,6 +56,7 @@ def generate_kustomize(state: ServiceDeployState) -> dict[str, Any]:
     spec = state.get("spec", {})
     review_issues = state.get("review_issues", [])
     issue_block = "\n".join(f"- {i}" for i in review_issues) if review_issues else ""
+    steer_block = _steer_block(state.get("new_inputs", []))
 
     llm = get_llm("coding")
     messages = [
@@ -65,6 +67,7 @@ def generate_kustomize(state: ServiceDeployState) -> dict[str, Any]:
                 f"Conventions:\n{state.get('conventions', '')}\n\n"
                 f"Service evidence:\n{_format_evidence(state.get('service_evidence', []))}\n\n"
                 + (f"Previous review issues (fix these):\n{issue_block}\n\n" if issue_block else "")
+                + steer_block
                 + "Generate the Deployment, Service, and kustomization.yaml."
             )
         ),

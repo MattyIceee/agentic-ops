@@ -121,6 +121,44 @@ class GiteaClient:
         return self._get(f"/repos/{owner}/{repo}/issues/{index}").json()
 
     @_retry
+    def list_issue_comments(self, owner: str, repo: str, index: int) -> list[dict]:
+        """List comments on a PR or issue (Gitea treats PRs as issues).
+
+        Returns the Gitea comment objects in chronological order; each carries a
+        ``user`` object (with ``login``) and a ``created_at`` timestamp.
+        """
+        return self._get(f"/repos/{owner}/{repo}/issues/{index}/comments").json()
+
+    @_retry
+    def list_pr_reviews(self, owner: str, repo: str, index: int) -> list[dict]:
+        """List reviews on a pull request.
+
+        Change requests submitted via the review UI ("Request changes") do NOT
+        appear in ``list_issue_comments``; they live here. Each review carries a
+        ``user``, a ``state`` (APPROVED/REQUEST_CHANGES/COMMENT/PENDING), a
+        ``body``, and a ``submitted_at`` timestamp.
+        """
+        return self._get(f"/repos/{owner}/{repo}/pulls/{index}/reviews").json()
+
+    @_retry
+    def list_pr_review_comments(
+        self, owner: str, repo: str, index: int, review_id: int
+    ) -> list[dict]:
+        """List the line comments attached to a single PR review."""
+        return self._get(
+            f"/repos/{owner}/{repo}/pulls/{index}/reviews/{review_id}/comments"
+        ).json()
+
+    @_retry
+    def get_authenticated_user(self) -> dict:
+        """Return the account the current token authenticates as (``/user``).
+
+        Used to identify our own comments/commits so re-drive triage never
+        re-triggers on activity we produced ourselves.
+        """
+        return self._get("/user").json()
+
+    @_retry
     def approve_pr(self, owner: str, repo: str, index: int, body: str = "LGTM") -> dict:
         """Approve a pull request with a review. Returns the created review object."""
         return self._post(

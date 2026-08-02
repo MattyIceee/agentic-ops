@@ -50,6 +50,17 @@ def assess_risk(state: UpdateReviewState) -> dict[str, Any]:
         else "(none extracted)"
     )
 
+    # On a comment-driven re-review, fold the follow-up comment(s) into the
+    # prompt so the reasoned judgment directly addresses what was raised.
+    new_inputs = state.get("new_inputs", []) or []
+    comment_block = ""
+    if new_inputs:
+        joined = "\n".join(f"@{c.get('author', '?')}: {c.get('text', '')}" for c in new_inputs)
+        comment_block = (
+            "\n\nA reviewer left follow-up comment(s) on the PR — take them into "
+            f"account and address the concern raised:\n{joined}\n"
+        )
+
     llm = get_llm("reason")
     structured_llm = llm.with_structured_output(RiskAssessment)
 
@@ -60,7 +71,8 @@ def assess_risk(state: UpdateReviewState) -> dict[str, Any]:
                 f"Dependency: {state['dependency']} "
                 f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
                 f"Verbatim findings already extracted:\n{findings_block}\n\n"
-                f"Evidence:\n{evidence_block}\n\n"
+                f"Evidence:\n{evidence_block}\n"
+                f"{comment_block}\n"
                 "Give your reasoned risk assessment."
             )
         ),

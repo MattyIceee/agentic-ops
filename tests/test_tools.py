@@ -105,11 +105,16 @@ def test_get_fetch_tool_is_invocable():
     assert hasattr(tool, "invoke")
 
 
-def test_get_gitea_tools_returns_three_tools():
+def test_get_gitea_tools_returns_expected_tools():
     from ops_agent.tools.gitea import get_gitea_tools
 
     tools = get_gitea_tools()
-    assert len(tools) == 3
+    assert {t.name for t in tools} == {
+        "gitea_get_pr",
+        "gitea_post_comment",
+        "gitea_create_pr",
+        "gitea_approve_pr",
+    }
 
 
 # ─────────────────────────── GiteaClient mock test ─────────────────────────

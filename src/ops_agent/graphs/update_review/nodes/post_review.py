@@ -106,7 +106,11 @@ def _build_comment(state: UpdateReviewState) -> str:
     if rating:
         comment += _RATING_LINE.format(rating=rating)
 
-    comment += "\n\n---\n*Posted by ops-agent*"
+    turn = state.get("turn", 0) or 0
+    footer = "*Posted by ops-agent*"
+    if turn > 0:
+        footer = f"*Re-review #{turn} by ops-agent — prompted by a follow-up comment*"
+    comment += f"\n\n---\n{footer}"
     return comment
 
 

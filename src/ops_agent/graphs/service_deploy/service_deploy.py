@@ -26,12 +26,29 @@ from ops_agent.graphs.service_deploy.nodes.load_conventions import load_conventi
 from ops_agent.graphs.service_deploy.nodes.parse_request import parse_request
 from ops_agent.graphs.service_deploy.nodes.research_service import research_service
 from ops_agent.graphs.service_deploy.nodes.self_review import self_review
+from ops_agent.graphs.service_deploy.nodes.triage import triage
 from ops_agent.state import ServiceDeployState
 from ops_agent.tracing import get_langfuse_handler
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 2
+
+
+def _route_after_triage(
+    state: ServiceDeployState,
+) -> Literal["parse_request", "generate_helmrelease", "generate_kustomize", "__end__"]:
+    """Dispatch from triage: full scaffold, steer re-generation, or stop.
+
+    A steer turn jumps straight to the generator that first-run chose (Helm vs
+    Kustomize, persisted in state), skipping parse/research/conventions.
+    """
+    route = state.get("_route", "none")
+    if route == "full":
+        return "parse_request"
+    if route == "steer":
+        return "generate_helmrelease" if state.get("helm_chart_found") else "generate_kustomize"
+    return "__end__"
 
 
 def _route_after_conventions(
@@ -68,6 +85,7 @@ def build_graph() -> Any:
 
     graph = StateGraph(ServiceDeployState)
 
+    graph.add_node("triage", triage)
     graph.add_node("parse_request", parse_request)
     graph.add_node("research_service", research_service)
     graph.add_node("assess_helm", assess_helm)
@@ -78,7 +96,17 @@ def build_graph() -> Any:
     graph.add_node("self_review", self_review)
     graph.add_node("commit_and_pr", commit_and_pr)
 
-    graph.set_entry_point("parse_request")
+    graph.set_entry_point("triage")
+    graph.add_conditional_edges(
+        "triage",
+        _route_after_triage,
+        {
+            "parse_request": "parse_request",
+            "generate_helmrelease": "generate_helmrelease",
+            "generate_kustomize": "generate_kustomize",
+            "__end__": END,
+        },
+    )
     graph.add_edge("parse_request", "research_service")
     graph.add_edge("research_service", "assess_helm")
     graph.add_edge("assess_helm", "load_conventions")
@@ -192,6 +220,11 @@ def run(
         "_owner": owner,
         "_repo": repo,
         "issue_number": issue_number,
+        "pr_index": None,
+        "pr_branch": None,
+        "new_inputs": [],
+        "turn": 0,
+        "_route": "",
     }
 
     callbacks = [ctx.handler] if ctx.handler else []
@@ -204,16 +237,19 @@ def run(
         state = compiled.get_state(config)
         logger.debug("Checkpoint state: values=%s, next=%s", state.values is not None, state.next)
 
-        if state.values and not state.next:
-            # Checkpoint exists, no pending nodes -> already finished
-            logger.debug("Resuming from completed checkpoint (thread_id=%s)", checkpoint_id)
-            final_state = state.values
-        elif state.next:
-            # Checkpoint exists with pending nodes -> resume
+        if state.next:
+            # Checkpoint with pending nodes -> native crash-recovery resume.
             logger.debug("Resuming from checkpoint (thread_id=%s) at nodes: %s", checkpoint_id, state.next)
             final_state = compiled.invoke(None, config)
+        elif state.values:
+            # Completed checkpoint -> re-drive. Increment only (never the full
+            # initial state, which would double accumulating channels); triage
+            # decides whether a steering comment warrants re-generation.
+            prev_turn = state.values.get("turn", 0) or 0
+            logger.debug("Re-driving completed checkpoint (thread_id=%s) turn=%d", checkpoint_id, prev_turn + 1)
+            final_state = compiled.invoke({"turn": prev_turn + 1}, config)
         else:
-            # No checkpoint -> fresh run
+            # No checkpoint -> fresh run.
             logger.debug("Starting fresh execution (thread_id=%s)", checkpoint_id)
             final_state = compiled.invoke(initial_state, config)
     except Exception as e:

@@ -14,6 +14,16 @@ from ops_agent.types import EvidenceItem
 
 logger = logging.getLogger(__name__)
 
+# Push result flags that mean the remote refused the update. A silent
+# non-fast-forward rejection would otherwise let us post an acknowledgment
+# claiming a push that never landed.
+_PUSH_ERROR_FLAGS = (
+    gitlib.PushInfo.ERROR
+    | gitlib.PushInfo.REJECTED
+    | gitlib.PushInfo.REMOTE_REJECTED
+    | gitlib.PushInfo.REMOTE_FAILURE
+)
+
 
 def _format_evidence(evidence: list[EvidenceItem]) -> str:
     if not evidence:
@@ -46,6 +56,19 @@ def _build_pr_body(state: ServiceDeployState) -> str:
         lines.append(f"\nCloses #{issue_number}")
 
     return "\n".join(lines)
+
+
+def _build_steer_ack(state: ServiceDeployState) -> str:
+    """Short comment acknowledging the steering request we just applied."""
+    new_inputs = state.get("new_inputs", []) or []
+    quoted = "\n".join(f"> @{c.get('author', '?')}: {c.get('text', '')}" for c in new_inputs)
+    files = ", ".join(f"`{f}`" for f in state.get("manifests", {})) or "(none)"
+    return (
+        "## 🔧 Updated deployment per your comment\n\n"
+        f"{quoted}\n\n"
+        f"Regenerated and pushed: {files}\n\n"
+        "---\n*Updated by ops-agent*"
+    )
 
 
 def _set_auth_header(repo: gitlib.Repo, gitea_token: str) -> None:
@@ -97,23 +120,56 @@ def _get_or_clone_repo(
     return repo_dir
 
 
+def _remote_branch_exists(repo: gitlib.Repo, branch_name: str) -> bool:
+    """True if origin already has this branch (an open PR branch to update)."""
+    return branch_name in [ref.remote_head for ref in repo.remotes.origin.refs]
+
+
 def _sync_and_branch(repo_dir: Path, branch_name: str) -> None:
-    """Checkout main, pull latest, create and checkout new branch."""
+    """Prepare a correct local base for ``branch_name``, then check it out.
+
+    Fetches first, then chooses the base so the follow-up commit always
+    fast-forwards on push and never diverges from existing history — even on a
+    fresh clone where the local branch is absent:
+
+      * if origin already has the branch (an open PR), base the local branch on
+        the REMOTE tip via a hard reset;
+      * otherwise create the branch from an up-to-date ``origin/main``.
+    """
     repo = gitlib.Repo(repo_dir)
+    origin = repo.remotes.origin
 
-    logger.info("Checking out main branch")
-    repo.heads.main.checkout()
+    logger.info("Fetching origin")
+    origin.fetch(prune=True)
 
-    logger.info("Pulling latest changes from origin")
-    repo.remotes.origin.pull()
-
-    logger.info("Creating branch %s", branch_name)
-    if branch_name in [h.name for h in repo.heads]:
-        logger.info("Branch already exists, checking out %s", branch_name)
-        repo.heads[branch_name].checkout()
+    if _remote_branch_exists(repo, branch_name):
+        remote_ref = origin.refs[branch_name]
+        if branch_name in [h.name for h in repo.heads]:
+            repo.heads[branch_name].checkout()
+        else:
+            repo.create_head(branch_name, remote_ref)
+            repo.heads[branch_name].set_tracking_branch(remote_ref)
+            repo.heads[branch_name].checkout()
+        # Match the remote tip exactly so our commit is a clean child of it.
+        repo.git.reset("--hard", remote_ref.name)
+        logger.info("Based %s on remote tip %s", branch_name, remote_ref.name)
     else:
-        new_branch = repo.create_head(branch_name)
-        new_branch.checkout()
+        repo.heads.main.checkout()
+        repo.git.reset("--hard", "origin/main")
+        if branch_name in [h.name for h in repo.heads]:
+            repo.heads[branch_name].checkout()
+        else:
+            repo.create_head(branch_name).checkout()
+        logger.info("Created %s from origin/main", branch_name)
+
+
+def _push_branch(repo: gitlib.Repo, branch_name: str) -> None:
+    """Push ``branch_name`` to origin, raising if the remote rejected it."""
+    results = repo.remotes.origin.push(refspec=f"{branch_name}:{branch_name}")
+    for info in results:
+        if info.flags & _PUSH_ERROR_FLAGS:
+            raise RuntimeError(f"Failed to push {branch_name}: {info.summary}")
+    logger.info("Pushed branch %s to origin", branch_name)
 
 
 def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
@@ -160,8 +216,7 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
             author=author,
             committer=author,
         )
-        repo.remotes.origin.push(refspec=f"{branch}:{branch}")
-        logger.info("Pushed branch %s to origin", branch)
+        _push_branch(repo, branch)
     except Exception as exc:
         # Re-raise so the graph does NOT checkpoint this as a completed run.
         # Swallowing the error into pr_url makes LangGraph mark the thread
@@ -171,6 +226,27 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
         logger.error("Git operation failed: %s", exc, exc_info=True)
         raise
 
+    existing_pr_index = state.get("pr_index")
+
+    # Re-drive / steer turn: the PR is already open and we just pushed the
+    # updated manifests to its branch. Don't open a second PR — acknowledge the
+    # steering comment instead (which also advances the comment boundary so the
+    # same comment can't re-trigger triage next tick).
+    if existing_pr_index:
+        client = GiteaClient()
+        try:
+            try:
+                client.post_issue_comment(
+                    owner, repo_name, existing_pr_index, _build_steer_ack(state)
+                )
+            except Exception as exc:
+                logger.warning("could not post steer ack on PR #%s: %s", existing_pr_index, exc)
+        finally:
+            client.close()
+        logger.info("Pushed update to existing PR #%s", existing_pr_index)
+        return {"pr_url": state.get("pr_url"), "pr_index": existing_pr_index, "pr_branch": branch}
+
+    # First run: open the PR and remember its identity for later turns.
     try:
         client = GiteaClient()
         try:
@@ -183,11 +259,12 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
                 base="main",
             )
             pr_url = pr.get("html_url", str(pr))
+            pr_index = pr.get("number")
             logger.info("Created PR: %s", pr_url)
         finally:
             client.close()
     except Exception as exc:
         logger.error("PR creation failed: %s", exc, exc_info=True)
-        pr_url = f"Branch pushed but PR creation failed: {exc}"
+        return {"pr_url": f"Branch pushed but PR creation failed: {exc}"}
 
-    return {"pr_url": pr_url}
+    return {"pr_url": pr_url, "pr_index": pr_index, "pr_branch": branch}

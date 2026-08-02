@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
@@ -43,7 +43,7 @@ def research_service(state: ServiceDeployState) -> dict[str, Any]:
 
         llm = get_llm("research")
         tools = [get_search_tool(), get_fetch_tool()]
-        agent = create_react_agent(llm, tools, prompt=_RESEARCH_SERVICE_SYSTEM)
+        agent = create_agent(llm, tools, system_prompt=_RESEARCH_SERVICE_SYSTEM)
 
         link_block = "\n".join(f"- {url}" for url in links) if links else "(none provided)"
         user_msg = (

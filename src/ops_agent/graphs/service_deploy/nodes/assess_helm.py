@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
@@ -43,7 +43,7 @@ def assess_helm(state: ServiceDeployState) -> dict[str, Any]:
 
         llm = get_llm("research")
         tools = [get_search_tool(), get_fetch_tool()]
-        agent = create_react_agent(llm, tools, prompt=_ASSESS_HELM_SYSTEM)
+        agent = create_agent(llm, tools, system_prompt=_ASSESS_HELM_SYSTEM)
 
         user_msg = (
             f"Assess whether a well-maintained upstream Helm chart exists for: {name}\n"

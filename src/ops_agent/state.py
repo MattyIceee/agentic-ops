@@ -18,7 +18,7 @@ class UpdateReviewState(TypedDict):
     pr_index: int
     _owner: str
     _repo: str
-    thread_id: str  # Checkpoint key: based on last commit ID from PR
+    thread_id: str  # Last-reviewed head commit SHA (also the re-drive boundary for commits)
     dependency: str
     current_version: str
     new_version: str
@@ -31,6 +31,12 @@ class UpdateReviewState(TypedDict):
     _risk: RiskAssessment | None
     verdict: Verdict | None
     posted: bool
+    # Interactive re-drive: triage gathers this turn's new external input
+    # (foreign comments, stored as plain dicts for checkpoint serialization) and
+    # picks a route. new_inputs is per-turn (overwrite), set on every triage.
+    new_inputs: list[dict]
+    turn: int
+    _route: str
 
 
 class ServiceDeployState(TypedDict):
@@ -53,3 +59,12 @@ class ServiceDeployState(TypedDict):
     _owner: str  # Internal: Gitea repo owner (optional)
     _repo: str  # Internal: Gitea repo name (optional)
     issue_number: int | None  # Internal: issue number if provided
+    # Set once the PR is opened so later turns push to the SAME branch/PR
+    # instead of opening a new one, and so triage knows where to watch.
+    pr_index: int | None
+    pr_branch: str | None
+    # Interactive re-drive: triage gathers this turn's steering comments (plain
+    # dicts for checkpoint serialization) and picks a route. Per-turn overwrite.
+    new_inputs: list[dict]
+    turn: int
+    _route: str
