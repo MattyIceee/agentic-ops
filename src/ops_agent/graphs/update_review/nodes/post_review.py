@@ -111,18 +111,30 @@ def _build_comment(state: UpdateReviewState) -> str:
 
 
 def post_review(state: UpdateReviewState) -> dict[str, Any]:
-    """Post the verdict as a Gitea PR comment."""
+    """Post the verdict as a Gitea PR comment. Approve if decision is 'clear'."""
     import sys
 
     owner: str = state["_owner"]  # type: ignore[typeddict-item]
     repo: str = state["_repo"]  # type: ignore[typeddict-item]
     index: int = state["pr_index"]
+    verdict: Verdict = state["verdict"]  # type: ignore[assignment]
 
     comment = _build_comment(state)
 
     client = GiteaClient()
     try:
         client.post_issue_comment(owner, repo, index, comment)
+
+        # Auto-approve if no breaking changes detected
+        if verdict.decision == "clear":
+            try:
+                client.approve_pr(owner, repo, index, body=verdict.summary)
+            except Exception as approve_exc:
+                print(
+                    f"\nWarning: could not approve PR {owner}/{repo}#{index}: {approve_exc}",
+                    file=sys.stderr,
+                )
+
         return {"posted": True}
     except Exception as exc:
         print(

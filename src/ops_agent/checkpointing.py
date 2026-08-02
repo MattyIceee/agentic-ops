@@ -48,3 +48,16 @@ def get_checkpoint_saver() -> PostgresSaver:
     saver.setup()
     logger.debug("PostgreSQL checkpoint saver initialized")
     return saver
+
+
+def clear_thread(thread_id: str) -> bool:
+    """Delete all checkpoints for a thread so the next run starts fresh.
+
+    Returns False if checkpointing is disabled (nothing to clear).
+    """
+    saver = get_checkpoint_saver()
+    if saver is None:
+        return False
+    saver.delete_thread(thread_id)
+    logger.info("Cleared checkpoint thread %s", thread_id)
+    return True

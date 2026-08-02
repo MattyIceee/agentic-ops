@@ -385,3 +385,116 @@ def test_scheme_change_regression_finding_shape():
     verdict = out["verdict"]
     assert verdict.decision == "regression"
     assert verdict.findings[0].source == "version-analysis"
+
+
+# ─────────────────────── post_review approval tests ───────────────────────
+
+
+def test_post_review_approves_clear_verdict(monkeypatch):
+    """When verdict is 'clear', post_review should call approve_pr."""
+    from ops_agent.graphs.update_review.nodes.post_review import post_review
+    from ops_agent.tools.gitea import GiteaClient
+
+    approve_calls = []
+
+    def fake_post_issue_comment(self, owner, repo, index, body):
+        return {"id": 1}
+
+    def fake_approve_pr(self, owner, repo, index, body="LGTM"):
+        approve_calls.append((owner, repo, index, body))
+        return {"id": 2}
+
+    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr)
+    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "requests",
+        "current_version": "2.28.0",
+        "new_version": "2.32.0",
+        "verdict": Verdict(
+            decision="clear",
+            findings=[],
+            summary="No breaking changes found.",
+            risk=None,
+        ),
+    })
+
+    result = post_review(state)
+
+    assert result["posted"] is True
+    assert len(approve_calls) == 1
+    assert approve_calls[0] == ("myorg", "myrepo", 1, "No breaking changes found.")
+
+
+def test_post_review_does_not_approve_breaking_verdict(monkeypatch):
+    """When verdict is 'breaking', post_review should NOT call approve_pr."""
+    from ops_agent.graphs.update_review.nodes.post_review import post_review
+    from ops_agent.tools.gitea import GiteaClient
+
+    approve_calls = []
+
+    def fake_post_issue_comment(self, owner, repo, index, body):
+        return {"id": 1}
+
+    def fake_approve_pr(self, owner, repo, index, body="LGTM"):
+        approve_calls.append((owner, repo, index, body))
+        return {"id": 2}
+
+    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr)
+    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "requests",
+        "current_version": "2.28.0",
+        "new_version": "2.32.0",
+        "verdict": Verdict(
+            decision="breaking",
+            findings=[Finding(claim="API removed", source="changelog", quote="removed foo()")],
+            summary="Breaking changes found.",
+            risk=None,
+        ),
+    })
+
+    result = post_review(state)
+
+    assert result["posted"] is True
+    assert len(approve_calls) == 0
+
+
+def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
+    """If approve_pr fails, post_review should still return posted=True."""
+    from ops_agent.graphs.update_review.nodes.post_review import post_review
+    from ops_agent.tools.gitea import GiteaClient
+    import sys
+
+    def fake_post_issue_comment(self, owner, repo, index, body):
+        return {"id": 1}
+
+    def fake_approve_pr_fails(self, owner, repo, index, body="LGTM"):
+        raise Exception("Authorization failed: token needs write:repository scope")
+
+    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr_fails)
+    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "requests",
+        "current_version": "2.28.0",
+        "new_version": "2.32.0",
+        "verdict": Verdict(
+            decision="clear",
+            findings=[],
+            summary="No breaking changes found.",
+            risk=None,
+        ),
+    })
+
+    result = post_review(state)
+
+    # Even though approve_pr failed, the comment was posted
+    assert result["posted"] is True

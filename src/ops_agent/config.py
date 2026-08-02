@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     git_author_name: str = "ops-agent"
     git_author_email: str = "ops-agent@homelab.local"
 
-    # Optional: local repo path Graph B uses to learn conventions
-    example_repo_path: str | None = None
+    # Base directory where repos are cloned and managed.
+    # Defaults to a container-friendly path; mount a volume here so cloned
+    # repos persist across container restarts (the clone/reuse fast path
+    # depends on them surviving). Override via env for local dev on Windows,
+    # where a bare POSIX path resolves to the drive root.
+    repo_location: str = "/data/repos"
 
     # HTTP behaviour
     request_timeout_seconds: int = 120

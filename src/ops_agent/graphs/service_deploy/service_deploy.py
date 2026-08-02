@@ -118,6 +118,7 @@ def run(
     issue_number: int | None = None,
     id: str | None = None,
     thread_id: str | None = None,
+    fresh: bool = False,
 ) -> str | None:
     """Run the full scaffold graph for a deployment request.
 
@@ -130,6 +131,8 @@ def run(
         issue_number: Optional issue number to link
         id: Optional explicit checkpoint ID for resuming
         thread_id: Optional explicit thread ID for checkpointing
+        fresh: If True, delete any existing checkpoint for this thread before
+            running, forcing a clean execution from the start.
 
     Returns the PR URL from the final state, or None if not set.
     """
@@ -143,7 +146,12 @@ def run(
     else:
         checkpoint_id = "scaffold_deploy_no_id"
 
-    trace_name = f"service-deploy/{checkpoint_id}"
+    if fresh:
+        from ops_agent.checkpointing import clear_thread
+
+        clear_thread(checkpoint_id)
+
+    trace_name = f"service-deploy {issue_number}" if issue_number else "service-deploy"
     logger.info("Starting %s", trace_name)
 
     tags = ["graph:service-deploy"]

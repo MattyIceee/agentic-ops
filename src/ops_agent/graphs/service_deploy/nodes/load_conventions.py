@@ -1,5 +1,6 @@
-"""Node: load_conventions - reads example repo and summarizes conventions."""
+"""Node: load_conventions - analyzes target repo and extracts its conventions."""
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -7,13 +8,15 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ops_agent.config import get_settings
+from ops_agent.graphs.service_deploy.nodes.commit_and_pr import _get_or_clone_repo
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
 
+logger = logging.getLogger(__name__)
+
 _CONVENTIONS_SYSTEM = """\
-You are a Kubernetes/GitOps conventions analyst. Given the contents of a homelab
-Flux/Kustomize repository, summarize the conventions used so a code generator can
-follow them. Focus on:
+You are a Kubernetes/GitOps conventions analyst. Given the contents of a Flux/Kustomize
+repository, summarize the conventions used so a code generator can follow them. Focus on:
 - Directory structure (apps/, infrastructure/, etc.)
 - Namespace conventions
 - Common labels and annotations
@@ -26,16 +29,29 @@ Be concise — this summary will be passed to a code generator.
 
 
 def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
-    """Read the example repo and summarize its layout conventions."""
+    """Clone target repo and analyze its conventions."""
     settings = get_settings()
-    repo_path = settings.example_repo_path
 
-    if not repo_path:
-        return {"conventions": "No example repo configured. Use generic Kubernetes/Flux conventions."}
+    owner: str = state.get("_owner", "")  # type: ignore[typeddict-item]
+    repo_name: str = state.get("_repo", "")  # type: ignore[typeddict-item]
 
-    repo_dir = Path(repo_path)
-    if not repo_dir.exists():
-        return {"conventions": f"Example repo not found at {repo_path}. Using generic conventions."}
+    if not owner or not repo_name:
+        logger.warning("No _owner/_repo in state; using generic conventions")
+        return {
+            "conventions": "Use standard Kubernetes/Flux GitOps conventions: apps directory structure, HelmRelease CRDs, Kustomize overlays, and standard labeling patterns."
+        }
+
+    try:
+        repo_dir = _get_or_clone_repo(
+            owner,
+            repo_name,
+            Path(settings.repo_location),
+            settings.gitea_base_url,
+            settings.gitea_token,
+        )
+    except Exception as exc:
+        logger.error("Failed to clone repo %s/%s: %s", owner, repo_name, exc)
+        return {"conventions": f"Failed to clone repo: {exc}"}
 
     structure_lines: list[str] = []
     sample_files: dict[str, str] = {}
@@ -60,8 +76,7 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
 
     structure = "\n".join(structure_lines[:120])
     samples_block = "\n\n".join(
-        f"### {path}\n```yaml\n{content}\n```"
-        for path, content in sample_files.items()
+        f"### {path}\n```yaml\n{content}\n```" for path, content in sample_files.items()
     )
 
     llm = get_llm("research")
@@ -78,4 +93,5 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
 
     response = llm.invoke(messages)
     conventions: str = response.content if hasattr(response, "content") else str(response)
+    logger.info("Extracted conventions from %s/%s", owner, repo_name)
     return {"conventions": conventions}

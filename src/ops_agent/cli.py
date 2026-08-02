@@ -91,6 +91,7 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
             id=checkpoint_id,
             owner=args.owner or "",
             repo=args.repo or "",
+            fresh=getattr(args, "fresh", False),
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -154,6 +155,11 @@ def main() -> None:
         "--id",
         metavar="ID",
         help="Checkpoint ID for resuming from a previous run (use with --prompt or --prompt-file)",
+    )
+    scaffold_p.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Delete any existing checkpoint for this thread and run from scratch",
     )
     scaffold_p.set_defaults(func=_cmd_scaffold)
 

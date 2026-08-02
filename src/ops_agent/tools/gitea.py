@@ -120,6 +120,14 @@ class GiteaClient:
         """Fetch issue metadata. Returns the Gitea issue object as a dict."""
         return self._get(f"/repos/{owner}/{repo}/issues/{index}").json()
 
+    @_retry
+    def approve_pr(self, owner: str, repo: str, index: int, body: str = "LGTM") -> dict:
+        """Approve a pull request with a review. Returns the created review object."""
+        return self._post(
+            f"/repos/{owner}/{repo}/pulls/{index}/reviews",
+            json={"event": "APPROVED", "body": body},
+        ).json()
+
     def close(self) -> None:
         self._client.close()
 
@@ -212,6 +220,29 @@ def gitea_create_pr(
         client.close()
 
 
+@tool
+def gitea_approve_pr(owner: str, repo: str, index: int, body: str = "LGTM") -> str:
+    """Approve a pull request on Gitea.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        index: PR number.
+        body: Optional review body text (default: "LGTM").
+
+    Returns:
+        Confirmation string with the review ID, or an error message.
+    """
+    client = GiteaClient()
+    try:
+        result = client.approve_pr(owner, repo, index, body)
+        return f"PR approved (review_id={result.get('id', '?')})"
+    except Exception as exc:
+        return f"Error approving PR: {exc}"
+    finally:
+        client.close()
+
+
 def get_gitea_tools() -> list:
     """Return the list of LangChain Gitea tools."""
-    return [gitea_get_pr, gitea_post_comment, gitea_create_pr]
+    return [gitea_get_pr, gitea_post_comment, gitea_create_pr, gitea_approve_pr]

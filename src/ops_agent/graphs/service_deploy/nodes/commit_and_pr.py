@@ -1,5 +1,7 @@
-"""Node: commit_and_pr - writes manifests, commits, pushes, opens PR."""
+"""Node: commit_and_pr - clones/syncs repo, writes manifests, commits, pushes, opens PR."""
 
+import logging
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +11,8 @@ from ops_agent.config import get_settings
 from ops_agent.state import ServiceDeployState
 from ops_agent.tools.gitea import GiteaClient
 from ops_agent.types import EvidenceItem
+
+logger = logging.getLogger(__name__)
 
 
 def _format_evidence(evidence: list[EvidenceItem]) -> str:
@@ -44,27 +48,107 @@ def _build_pr_body(state: ServiceDeployState) -> str:
     return "\n".join(lines)
 
 
+def _set_auth_header(repo: gitlib.Repo, gitea_token: str) -> None:
+    """Persist the Gitea token auth header in the repo config.
+
+    This makes token auth work for all HTTPS operations (fetch/pull/push),
+    not just the initial clone.
+    """
+    with repo.config_writer() as cw:
+        cw.set_value("http", "extraHeader", f"Authorization: token {gitea_token}")
+
+
+def _get_or_clone_repo(
+    owner: str,
+    repo_name: str,
+    workdir: Path,
+    gitea_url: str,
+    gitea_token: str,
+) -> Path:
+    """Ensure repo is cloned to workdir/owner/repo_name, clone if missing.
+
+    Uses token-based HTTPS auth. Returns the repo path.
+    """
+    repo_dir = workdir / owner / repo_name
+
+    if repo_dir.exists() and (repo_dir / ".git").exists():
+        logger.info("Repo already exists at %s", repo_dir)
+        _set_auth_header(gitlib.Repo(repo_dir), gitea_token)
+        return repo_dir
+
+    repo_dir.parent.mkdir(parents=True, exist_ok=True)
+    gitea_url_clean = gitea_url.rstrip("/")
+    clone_url = f"{gitea_url_clean}/{owner}/{repo_name}.git"
+
+    logger.info("Cloning %s to %s", clone_url, repo_dir)
+    # GitPython whitespace-splits each multi_options entry via
+    # ``shlex.split(" ".join(multi_options))``, so the space in the header
+    # value must be quoted or "-c http.extraHeader=Authorization: token <T>"
+    # is parsed as multiple args ("fatal: Too many arguments").
+    header = f"http.extraHeader=Authorization: token {gitea_token}"
+    repo = gitlib.Repo.clone_from(
+        clone_url,
+        str(repo_dir),
+        multi_options=["-c", shlex.quote(header)],
+        allow_unsafe_options=True,
+    )
+    # Persist the header so later pull/push also authenticate.
+    _set_auth_header(repo, gitea_token)
+    return repo_dir
+
+
+def _sync_and_branch(repo_dir: Path, branch_name: str) -> None:
+    """Checkout main, pull latest, create and checkout new branch."""
+    repo = gitlib.Repo(repo_dir)
+
+    logger.info("Checking out main branch")
+    repo.heads.main.checkout()
+
+    logger.info("Pulling latest changes from origin")
+    repo.remotes.origin.pull()
+
+    logger.info("Creating branch %s", branch_name)
+    if branch_name in [h.name for h in repo.heads]:
+        logger.info("Branch already exists, checking out %s", branch_name)
+        repo.heads[branch_name].checkout()
+    else:
+        new_branch = repo.create_head(branch_name)
+        new_branch.checkout()
+
+
 def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
-    """Write manifests to the repo working tree, commit, push, open a Gitea PR."""
+    """Clone/sync repo, write manifests, commit, push, open PR."""
     settings = get_settings()
-    repo_path = settings.example_repo_path
-    if not repo_path:
-        return {"pr_url": "ERROR: example_repo_path not configured; cannot commit."}
+    workdir = Path(settings.repo_location)
+
+    owner: str = state.get("_owner", "")  # type: ignore[typeddict-item]
+    repo_name: str = state.get("_repo", "")  # type: ignore[typeddict-item]
+
+    if not owner or not repo_name:
+        return {"pr_url": "ERROR: _owner and _repo must be set in state to commit changes."}
 
     spec = state.get("spec", {})
     service_name = spec.get("name", "service")
     branch = f"ops-agent/deploy-{service_name}"
     manifests = state.get("manifests", {})
 
-    deploy_dir = Path(repo_path) / "apps" / service_name
-    deploy_dir.mkdir(parents=True, exist_ok=True)
-    for fname, content in manifests.items():
-        (deploy_dir / fname).write_text(content, encoding="utf-8")
-
     try:
-        repo = gitlib.Repo(repo_path)
-        new_branch = repo.create_head(branch)
-        new_branch.checkout()
+        repo_dir = _get_or_clone_repo(
+            owner,
+            repo_name,
+            workdir,
+            settings.gitea_base_url,
+            settings.gitea_token,
+        )
+
+        _sync_and_branch(repo_dir, branch)
+
+        deploy_dir = repo_dir / "apps" / service_name
+        deploy_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in manifests.items():
+            (deploy_dir / fname).write_text(content, encoding="utf-8")
+
+        repo = gitlib.Repo(repo_dir)
         repo.git.add(A=True)
         author = gitlib.Actor(settings.git_author_name, settings.git_author_email)
         issue_number = state.get("issue_number")
@@ -77,14 +161,15 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
             committer=author,
         )
         repo.remotes.origin.push(refspec=f"{branch}:{branch}")
+        logger.info("Pushed branch %s to origin", branch)
     except Exception as exc:
-        return {"pr_url": f"Git error: {exc}"}
-
-    owner: str = state.get("_owner", "")  # type: ignore[typeddict-item]
-    repo_name: str = state.get("_repo", "")  # type: ignore[typeddict-item]
-
-    if not owner or not repo_name:
-        return {"pr_url": f"Branch '{branch}' pushed. Set _owner/_repo in state to auto-open PR."}
+        # Re-raise so the graph does NOT checkpoint this as a completed run.
+        # Swallowing the error into pr_url makes LangGraph mark the thread
+        # "finished", which permanently caches the failure and blocks retries.
+        # Raising leaves commit_and_pr as the pending node so a later run
+        # resumes here (or use --fresh to start over).
+        logger.error("Git operation failed: %s", exc, exc_info=True)
+        raise
 
     try:
         client = GiteaClient()
@@ -98,9 +183,11 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
                 base="main",
             )
             pr_url = pr.get("html_url", str(pr))
+            logger.info("Created PR: %s", pr_url)
         finally:
             client.close()
     except Exception as exc:
+        logger.error("PR creation failed: %s", exc, exc_info=True)
         pr_url = f"Branch pushed but PR creation failed: {exc}"
 
     return {"pr_url": pr_url}

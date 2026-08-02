@@ -76,7 +76,7 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
 
     Returns the Verdict from the final state.
     """
-    trace_name = f"update-review/{owner}/{repo}#{pr_index}"
+    trace_name = f"update-review {pr_index}"
     logger.info("Starting %s", trace_name)
 
     ctx = get_langfuse_handler(
