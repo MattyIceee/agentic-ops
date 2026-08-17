@@ -7,7 +7,7 @@ entry node checks the PR for NEW external input — activity authored by someone
 LangGraph's checkpointer preserves all prior state, so a re-drive resumes from a
 specific node without re-running upstream work.
 
-External steering can arrive two ways on a Gitea PR, and we watch BOTH:
+External steering can arrive two ways on a GitHub PR, and we watch BOTH:
 
 * issue/PR conversation comments  (``/issues/{index}/comments``)
 * pull-request reviews            (``/pulls/{index}/reviews``) — this is where a
@@ -16,10 +16,9 @@ External steering can arrive two ways on a Gitea PR, and we watch BOTH:
 
 "New" needs no separate watermark store; the boundary is derived live: any
 foreign activity newer than our own most recent activity (comment or review).
-Timestamps are parsed to timezone-aware datetimes — Gitea returns offset stamps
-like ``-05:00`` that do not sort correctly as raw strings. Our identity comes
-from Gitea's authenticated-user endpoint, so we never re-trigger on our own
-activity.
+Timestamps are parsed to timezone-aware datetimes — raw ISO strings do not sort
+correctly across offsets. Our identity comes from GitHub's authenticated-user
+endpoint, so we never re-trigger on our own activity.
 """
 
 from __future__ import annotations
@@ -29,31 +28,31 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 
 logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache(maxsize=1)
 def get_bot_login() -> str | None:
-    """Return the login of the account our Gitea token belongs to (cached).
+    """Return the login of the account our GitHub token belongs to (cached).
 
     Returns None if identity can't be resolved; callers then skip author
     filtering (the timestamp boundary still limits what counts as new).
     """
     try:
-        client = GiteaClient()
+        client = GitHubClient()
         try:
             return client.get_authenticated_user().get("login")
         finally:
             client.close()
     except Exception as exc:  # pragma: no cover - network/1st-run only
-        logger.warning("could not resolve bot identity from Gitea /user: %s", exc)
+        logger.warning("could not resolve bot identity from GitHub /user: %s", exc)
         return None
 
 
 def _parse_ts(raw: str | None) -> datetime | None:
-    """Parse a Gitea ISO-8601 timestamp (offset or 'Z') to an aware datetime."""
+    """Parse an ISO-8601 timestamp (offset or 'Z') to an aware datetime."""
     if not raw:
         return None
     try:
@@ -88,7 +87,7 @@ def _normalize_comments(comments: list[dict]) -> list[dict]:
     ]
 
 
-def _normalize_reviews(client: GiteaClient, owner: str, repo: str, index: int, reviews: list[dict]) -> list[dict]:
+def _normalize_reviews(client: GitHubClient, owner: str, repo: str, index: int, reviews: list[dict]) -> list[dict]:
     acts: list[dict] = []
     for rv in reviews:
         text = rv.get("body", "") or ""
@@ -133,7 +132,7 @@ def _foreign_since(activities: list[dict], bot_login: str | None, boundary: date
 
 
 def new_steering_inputs(
-    client: GiteaClient, owner: str, repo: str, index: int, bot_login: str | None
+    client: GitHubClient, owner: str, repo: str, index: int, bot_login: str | None
 ) -> list[dict]:
     """All foreign, unhandled steering input on a PR — comments AND reviews.
 
@@ -153,9 +152,12 @@ def new_steering_inputs(
 
 
 def head_commit_sha(pr: dict) -> str | None:
-    """Latest commit SHA on a PR, using the same source as ingest_pr."""
-    commits = pr.get("commits") or []
-    return commits[-1].get("id") if commits else None
+    """Latest commit SHA on a PR.
+
+    Reads ``head.sha``. Do NOT use ``pr["commits"]`` — on GitHub that field is an
+    integer count, not a list, so indexing it raises TypeError.
+    """
+    return (pr.get("head") or {}).get("sha")
 
 
 def steer_block(new_inputs: list[dict]) -> str:

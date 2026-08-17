@@ -14,7 +14,7 @@ every invocation and routes:
                            comment → classify_comment; nothing new → END.
 - classify_comment:        reasoned scope decision — does the comment need fresh
                            research (full) or just a re-judgment (light)?
-- ingest_pr:               reads PR metadata + diff via GiteaClient (no LLM)
+- ingest_pr:               reads PR metadata + diff via GitHubClient (no LLM)
 - research:                tool-calling agent (research persona) gathers evidence
 - extract_breaking_changes: structured extraction of quote-backed findings
                             (extract persona, no tools) — high-confidence trigger
@@ -23,7 +23,7 @@ every invocation and routes:
                             overrides, the verbatim findings
 - assemble_verdict:        pure Python decision logic, incl. a deterministic
                             downgrade / version-scheme check
-- post_review:             posts markdown comment via GiteaClient (no LLM)
+- post_review:             posts markdown comment via GitHubClient (no LLM)
 
 Checkpointing preserves prior evidence/verdict across turns, so a comment-driven
 re-review resumes from a specific node without re-running upstream work.

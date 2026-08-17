@@ -157,8 +157,8 @@ def run(
 
     Args:
         prompt: Deployment request text
-        owner: Optional Gitea repo owner
-        repo: Optional Gitea repo name
+        owner: Optional GitHub repo owner
+        repo: Optional GitHub repo name
         issue_number: Optional issue number to link
         id: Optional explicit checkpoint ID for resuming
         thread_id: Optional explicit thread ID for checkpointing

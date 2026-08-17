@@ -1,9 +1,9 @@
-"""Node: post_review - posts verdict as Gitea PR comment."""
+"""Node: post_review - posts verdict as GitHub PR comment."""
 
 from typing import Any
 
 from ops_agent.state import UpdateReviewState
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 from ops_agent.types import Finding, RiskAssessment, Verdict
 
 _RATING_LINE = "\n\n*Renovate Merge Confidence: {rating}*"
@@ -115,7 +115,7 @@ def _build_comment(state: UpdateReviewState) -> str:
 
 
 def post_review(state: UpdateReviewState) -> dict[str, Any]:
-    """Post the verdict as a Gitea PR comment. Approve if decision is 'clear'."""
+    """Post the verdict as a GitHub PR comment. Approve if decision is 'clear'."""
     import sys
 
     owner: str = state["_owner"]  # type: ignore[typeddict-item]
@@ -125,7 +125,7 @@ def post_review(state: UpdateReviewState) -> dict[str, Any]:
 
     comment = _build_comment(state)
 
-    client = GiteaClient()
+    client = GitHubClient()
     try:
         client.post_issue_comment(owner, repo, index, comment)
 
@@ -142,7 +142,7 @@ def post_review(state: UpdateReviewState) -> dict[str, Any]:
         return {"posted": True}
     except Exception as exc:
         print(
-            f"\nWarning: could not post Gitea comment on {owner}/{repo}#{index}: {exc}",
+            f"\nWarning: could not post GitHub comment on {owner}/{repo}#{index}: {exc}",
             file=sys.stderr,
         )
         print("\n--- Verdict (not posted) ---\n", file=sys.stderr)

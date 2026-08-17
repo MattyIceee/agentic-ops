@@ -1,10 +1,11 @@
-"""Node: ingest_pr - reads PR metadata and diff from Gitea."""
+"""Node: ingest_pr - reads PR metadata and diff from GitHub."""
 
 import re
 from typing import Any
 
+from ops_agent.graphs.interactive import head_commit_sha
 from ops_agent.state import UpdateReviewState
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 
 _MERGE_CONFIDENCE_RE = re.compile(
     r"merge\s+confidence[^\n]*?:\s*([^\n]+)", re.IGNORECASE
@@ -55,28 +56,25 @@ def _extract_current_version_from_diff(diff: str, new_version: str) -> str:
 
 
 def ingest_pr(state: UpdateReviewState) -> dict[str, Any]:
-    """Read PR metadata and diff from Gitea; parse dependency + versions."""
+    """Read PR metadata and diff from GitHub; parse dependency + versions."""
     owner: str = state["_owner"]  # type: ignore[typeddict-item]
     repo: str = state["_repo"]  # type: ignore[typeddict-item]
     index: int = state["pr_index"]
 
-    client = GiteaClient()
+    client = GitHubClient()
     try:
         pr = client.get_pr(owner, repo, index)
         diff = client.get_pr_diff(owner, repo, index)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to fetch PR {owner}/{repo}#{index} from Gitea: {exc}"
+            f"Failed to fetch PR {owner}/{repo}#{index} from GitHub: {exc}"
         ) from exc
     finally:
         client.close()
 
-    # Extract last commit ID from PR to use as checkpoint key.
-    # If commits list is missing, fall back to PR index.
-    commits = pr.get("commits") or []
-    last_commit_id = commits[-1].get("id") if commits else None
-    if not last_commit_id:
-        last_commit_id = f"{owner}/{repo}#{index}"
+    # Head commit SHA doubles as the checkpoint key; fall back to the PR ref if
+    # GitHub did not return a head (deleted fork branch, etc).
+    last_commit_id = head_commit_sha(pr) or f"{owner}/{repo}#{index}"
 
     title: str = pr.get("title", "")
     body: str = pr.get("body", "") or ""

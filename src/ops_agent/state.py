@@ -56,8 +56,8 @@ class ServiceDeployState(TypedDict):
     review_issues: list[str]
     retry_count: int
     pr_url: str | None
-    _owner: str  # Internal: Gitea repo owner (optional)
-    _repo: str  # Internal: Gitea repo name (optional)
+    _owner: str  # Internal: GitHub repo owner (optional)
+    _repo: str  # Internal: GitHub repo name (optional)
     issue_number: int | None  # Internal: issue number if provided
     # Set once the PR is opened so later turns push to the SAME branch/PR
     # instead of opening a new one, and so triage knows where to watch.

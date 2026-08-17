@@ -18,7 +18,7 @@ from typing import Any
 
 from ops_agent.graphs.interactive import get_bot_login, new_steering_inputs
 from ops_agent.state import ServiceDeployState
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def triage(state: ServiceDeployState) -> dict[str, Any]:
         return {"_route": "none", "new_inputs": []}
 
     bot = get_bot_login()
-    client = GiteaClient()
+    client = GitHubClient()
     try:
         new_inputs = new_steering_inputs(client, owner, repo, pr_index, bot)
     finally:

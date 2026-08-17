@@ -145,6 +145,20 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       TELEMETRY_ENABLED: "false"
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ops-agent-searxng
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./docker/searxng:/etc/searxng
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   ops_agent_postgres_data:
   ops_agent_clickhouse_data:

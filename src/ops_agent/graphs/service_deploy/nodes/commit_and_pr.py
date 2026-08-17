@@ -1,5 +1,6 @@
 """Node: commit_and_pr - clones/syncs repo, writes manifests, commits, pushes, opens PR."""
 
+import base64
 import logging
 import shlex
 from pathlib import Path
@@ -9,7 +10,7 @@ import git as gitlib
 
 from ops_agent.config import get_settings
 from ops_agent.state import ServiceDeployState
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 from ops_agent.types import EvidenceItem
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,16 @@ _PUSH_ERROR_FLAGS = (
     | gitlib.PushInfo.REMOTE_REJECTED
     | gitlib.PushInfo.REMOTE_FAILURE
 )
+
+
+def _auth_header_value(token: str) -> str:
+    """Build the git HTTP auth header value for GitHub.
+
+    GitHub's git-over-HTTPS wants Basic auth with the literal username
+    ``x-access-token`` — unlike Gitea, which accepted ``Authorization: token <T>``.
+    """
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return f"Authorization: Basic {encoded}"
 
 
 def _format_evidence(evidence: list[EvidenceItem]) -> str:
@@ -71,22 +82,22 @@ def _build_steer_ack(state: ServiceDeployState) -> str:
     )
 
 
-def _set_auth_header(repo: gitlib.Repo, gitea_token: str) -> None:
-    """Persist the Gitea token auth header in the repo config.
+def _set_auth_header(repo: gitlib.Repo, token: str) -> None:
+    """Persist the GitHub token auth header in the repo config.
 
     This makes token auth work for all HTTPS operations (fetch/pull/push),
     not just the initial clone.
     """
     with repo.config_writer() as cw:
-        cw.set_value("http", "extraHeader", f"Authorization: token {gitea_token}")
+        cw.set_value("http", "extraHeader", _auth_header_value(token))
 
 
 def _get_or_clone_repo(
     owner: str,
     repo_name: str,
     workdir: Path,
-    gitea_url: str,
-    gitea_token: str,
+    github_url: str,
+    token: str,
 ) -> Path:
     """Ensure repo is cloned to workdir/owner/repo_name, clone if missing.
 
@@ -96,19 +107,21 @@ def _get_or_clone_repo(
 
     if repo_dir.exists() and (repo_dir / ".git").exists():
         logger.info("Repo already exists at %s", repo_dir)
-        _set_auth_header(gitlib.Repo(repo_dir), gitea_token)
+        _set_auth_header(gitlib.Repo(repo_dir), token)
         return repo_dir
 
     repo_dir.parent.mkdir(parents=True, exist_ok=True)
-    gitea_url_clean = gitea_url.rstrip("/")
-    clone_url = f"{gitea_url_clean}/{owner}/{repo_name}.git"
+    github_url_clean = github_url.rstrip("/")
+    clone_url = f"{github_url_clean}/{owner}/{repo_name}.git"
 
     logger.info("Cloning %s to %s", clone_url, repo_dir)
     # GitPython whitespace-splits each multi_options entry via
     # ``shlex.split(" ".join(multi_options))``, so the space in the header
     # value must be quoted or "-c http.extraHeader=Authorization: token <T>"
     # is parsed as multiple args ("fatal: Too many arguments").
-    header = f"http.extraHeader=Authorization: token {gitea_token}"
+    # The token is now base64-encoded in .git/config (no worse than before,
+    # but not obfuscation).
+    header = f"http.extraHeader={_auth_header_value(token)}"
     repo = gitlib.Repo.clone_from(
         clone_url,
         str(repo_dir),
@@ -116,7 +129,7 @@ def _get_or_clone_repo(
         allow_unsafe_options=True,
     )
     # Persist the header so later pull/push also authenticate.
-    _set_auth_header(repo, gitea_token)
+    _set_auth_header(repo, token)
     return repo_dir
 
 
@@ -193,8 +206,8 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
             owner,
             repo_name,
             workdir,
-            settings.gitea_base_url,
-            settings.gitea_token,
+            settings.github_base_url,
+            settings.github_token,
         )
 
         _sync_and_branch(repo_dir, branch)
@@ -233,7 +246,7 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
     # steering comment instead (which also advances the comment boundary so the
     # same comment can't re-trigger triage next tick).
     if existing_pr_index:
-        client = GiteaClient()
+        client = GitHubClient()
         try:
             try:
                 client.post_issue_comment(
@@ -248,7 +261,7 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
 
     # First run: open the PR and remember its identity for later turns.
     try:
-        client = GiteaClient()
+        client = GitHubClient()
         try:
             pr = client.create_pr(
                 owner=owner,

@@ -17,14 +17,14 @@ from ops_agent.graphs.interactive import (
     new_steering_inputs,
 )
 from ops_agent.state import UpdateReviewState
-from ops_agent.tools.gitea import GiteaClient
+from ops_agent.tools.github import GitHubClient
 
 logger = logging.getLogger(__name__)
 
 
 def triage(state: UpdateReviewState) -> dict[str, Any]:
     """Decide whether the PR needs a (re-)review and by which path."""
-    # First run: nothing reviewed yet → run the full pipeline. No Gitea calls
+    # First run: nothing reviewed yet → run the full pipeline. No GitHub calls
     # needed for change detection; ingest_pr will fetch what it needs.
     if state.get("verdict") is None:
         return {"_route": "full", "new_inputs": []}
@@ -34,7 +34,7 @@ def triage(state: UpdateReviewState) -> dict[str, Any]:
     index: int = state["pr_index"]
 
     bot = get_bot_login()
-    client = GiteaClient()
+    client = GitHubClient()
     try:
         pr = client.get_pr(owner, repo, index)
         new_inputs = new_steering_inputs(client, owner, repo, index, bot)

@@ -1,6 +1,7 @@
 """Settings for ops-agent, loaded from environment / .env file."""
 
 import functools
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,15 +22,28 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # llama.cpp / model
+    # LLM provider — any OpenAI-compatible /v1 endpoint works (llama.cpp, vLLM,
+    # Ollama, LM Studio, OpenRouter, Groq, ...). Set LLM_PROVIDER to
+    # "openai-compatible" to disable the llama.cpp-specific extensions.
+    # The legacy LLAMACPP_* / MODEL_ALIAS variables are used as fallbacks when
+    # the corresponding LLM_* variables are unset.
+    llm_provider: Literal["llamacpp", "openai-compatible"] = "llamacpp"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+
+    # Legacy llama.cpp / model — fallback when the LLM_* variables are unset
     llamacpp_base_url: str = "http://localhost:8080/v1"
-    model_alias: str = "qwen3.6-a3b"
     llamacpp_api_key: str = "sk-no-auth"
+    model_alias: str = "qwen3.6-a3b"
 
     # External services (required)
     searxng_url: str = Field(..., description="Base URL of the self-hosted SearXNG instance")
-    gitea_base_url: str = Field(..., description="Base URL of the Gitea instance, no trailing slash")
-    gitea_token: str = Field(..., description="Gitea personal access token")
+
+    # GitHub: the API host and the git clone host differ, so they are separate settings.
+    github_api_base_url: str = "https://api.github.com/"
+    github_base_url: str = "https://github.com"
+    github_token: str = Field(..., description="GitHub fine-grained personal access token")
 
     # Git commit identity
     git_author_name: str = "ops-agent"

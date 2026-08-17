@@ -1,7 +1,7 @@
-"""Tests for tools: git_ops, search, fetch, gitea.
+"""Tests for tools: git_ops, search, fetch, github.
 
 git_ops tests use a real temporary git repo via tmp_path.
-GiteaClient tests mock httpx so no network is required.
+GitHubClient tests mock the githubkit transport so no network is required.
 """
 
 from __future__ import annotations
@@ -105,44 +105,62 @@ def test_get_fetch_tool_is_invocable():
     assert hasattr(tool, "invoke")
 
 
-def test_get_gitea_tools_returns_expected_tools():
-    from ops_agent.tools.gitea import get_gitea_tools
+def test_get_github_tools_returns_expected_tools():
+    from ops_agent.tools.github import get_github_tools
 
-    tools = get_gitea_tools()
+    tools = get_github_tools()
     assert {t.name for t in tools} == {
-        "gitea_get_pr",
-        "gitea_post_comment",
-        "gitea_create_pr",
-        "gitea_approve_pr",
+        "github_get_pr",
+        "github_post_comment",
+        "github_create_pr",
+        "github_approve_pr",
     }
 
 
-# ─────────────────────────── GiteaClient mock test ─────────────────────────
+# ─────────────────────── GitHubClient endpoint test ────────────────────────
 
-def test_gitea_client_get_pr_url_and_auth(monkeypatch):
-    """GiteaClient.get_pr must call the correct Gitea endpoint with auth header."""
-    from unittest.mock import MagicMock
-
+def test_github_client_get_pr_calls_correct_endpoint(monkeypatch):
+    """GitHubClient.get_pr must hit the right GitHub endpoint with auth."""
     import httpx
+
+    import ops_agent.tools.github as gh_mod
 
     captured: dict = {}
 
-    def fake_get(self_client, url, **kwargs):
-        captured["url"] = url
-        captured["auth_header"] = str(self_client.headers.get("authorization", ""))
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = {"number": 7, "title": "bump requests"}
-        return resp
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(
+            200,
+            json={"number": 7, "title": "bump requests"},
+            request=request,
+        )
 
-    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    real_github = gh_mod.GitHub
 
-    from ops_agent.tools.gitea import GiteaClient
+    def patched_github(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_github(*args, **kwargs)
 
-    client = GiteaClient()
+    monkeypatch.setattr(gh_mod, "GitHub", patched_github)
+
+    client = gh_mod.GitHubClient()
     result = client.get_pr("myorg", "myrepo", 7)
 
     assert captured["url"].endswith("/repos/myorg/myrepo/pulls/7")
-    assert "test-token" in captured["auth_header"]
+    assert "test-token" in captured["auth"]
     assert result["number"] == 7
     assert result["title"] == "bump requests"
+
+
+def test_head_commit_sha_ignores_github_commits_int():
+    """GitHub returns `commits` as an int count; only `head.sha` is a real SHA.
+
+    Regression: the Gitea-era code did `pr["commits"][-1]["id"]`, which raises
+    TypeError on GitHub because an int is truthy but not subscriptable.
+    """
+    from ops_agent.graphs.interactive import head_commit_sha
+
+    assert head_commit_sha({"commits": 3, "head": {"sha": "abc123"}}) == "abc123"
+    assert head_commit_sha({}) is None
+    assert head_commit_sha({"head": {}}) is None

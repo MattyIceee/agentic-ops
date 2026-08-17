@@ -95,8 +95,8 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
             owner,
             repo_name,
             Path(settings.repo_location),
-            settings.gitea_base_url,
-            settings.gitea_token,
+            settings.github_base_url,
+            settings.github_token,
         )
     except Exception as exc:
         logger.error("Failed to clone repo %s/%s: %s", owner, repo_name, exc)

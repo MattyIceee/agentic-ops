@@ -224,7 +224,7 @@ _BASE_STUBS = {
         "existing_namespaces": ["media", "monitoring"],
     },
     "decide_namespace": lambda s: {"spec": {**s.get("spec", {}), "namespace": "myapp"}},
-    "commit_and_pr": lambda s: {"pr_url": "https://gitea.test/myorg/myrepo/pulls/1"},
+    "commit_and_pr": lambda s: {"pr_url": "https://github.test/myorg/myrepo/pulls/1"},
 }
 
 # ─────────────────────────── Graph B tests ─────────────────────────────────
@@ -257,7 +257,7 @@ def test_scaffold_graph_helm_true_path(monkeypatch):
 
     assert result["helm_chart_found"] is True
     assert "helmrelease.yaml" in result["manifests"]
-    assert result["pr_url"] == "https://gitea.test/myorg/myrepo/pulls/1"
+    assert result["pr_url"] == "https://github.test/myorg/myrepo/pulls/1"
 
 
 def test_scaffold_graph_helm_false_path(monkeypatch):
@@ -291,7 +291,7 @@ def test_scaffold_graph_helm_false_path(monkeypatch):
 
     assert result["helm_chart_found"] is False
     assert "deployment.yaml" in result["manifests"]
-    assert result["pr_url"] == "https://gitea.test/myorg/myrepo/pulls/1"
+    assert result["pr_url"] == "https://github.test/myorg/myrepo/pulls/1"
 
 
 def test_scaffold_graph_self_review_retry_loop(monkeypatch):
@@ -334,7 +334,7 @@ def test_scaffold_graph_self_review_retry_loop(monkeypatch):
     assert len(generate_calls) == 2, "generate_helmrelease should be called twice"
     assert len(review_calls) == 2, "self_review should be called twice"
     assert result["retry_count"] == 1
-    assert result["pr_url"] == "https://gitea.test/myorg/myrepo/pulls/1"
+    assert result["pr_url"] == "https://github.test/myorg/myrepo/pulls/1"
 
 
 # ─────────────────────── decide_namespace unit tests ───────────────────────
@@ -453,7 +453,7 @@ def test_scheme_change_regression_finding_shape():
 def test_post_review_approves_clear_verdict(monkeypatch):
     """When verdict is 'clear', post_review should call approve_pr."""
     from ops_agent.graphs.update_review.nodes.post_review import post_review
-    from ops_agent.tools.gitea import GiteaClient
+    from ops_agent.tools.github import GitHubClient
 
     approve_calls = []
 
@@ -464,9 +464,9 @@ def test_post_review_approves_clear_verdict(monkeypatch):
         approve_calls.append((owner, repo, index, body))
         return {"id": 2}
 
-    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
-    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr)
-    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+    monkeypatch.setattr(GitHubClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GitHubClient, "approve_pr", fake_approve_pr)
+    monkeypatch.setattr(GitHubClient, "close", lambda self: None)
 
     state = dict(_RENOVATE_INITIAL)
     state.update({
@@ -491,7 +491,7 @@ def test_post_review_approves_clear_verdict(monkeypatch):
 def test_post_review_does_not_approve_breaking_verdict(monkeypatch):
     """When verdict is 'breaking', post_review should NOT call approve_pr."""
     from ops_agent.graphs.update_review.nodes.post_review import post_review
-    from ops_agent.tools.gitea import GiteaClient
+    from ops_agent.tools.github import GitHubClient
 
     approve_calls = []
 
@@ -502,9 +502,9 @@ def test_post_review_does_not_approve_breaking_verdict(monkeypatch):
         approve_calls.append((owner, repo, index, body))
         return {"id": 2}
 
-    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
-    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr)
-    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+    monkeypatch.setattr(GitHubClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GitHubClient, "approve_pr", fake_approve_pr)
+    monkeypatch.setattr(GitHubClient, "close", lambda self: None)
 
     state = dict(_RENOVATE_INITIAL)
     state.update({
@@ -528,7 +528,7 @@ def test_post_review_does_not_approve_breaking_verdict(monkeypatch):
 def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
     """If approve_pr fails, post_review should still return posted=True."""
     from ops_agent.graphs.update_review.nodes.post_review import post_review
-    from ops_agent.tools.gitea import GiteaClient
+    from ops_agent.tools.github import GitHubClient
 
     def fake_post_issue_comment(self, owner, repo, index, body):
         return {"id": 1}
@@ -536,9 +536,9 @@ def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
     def fake_approve_pr_fails(self, owner, repo, index, body="LGTM"):
         raise Exception("Authorization failed: token needs write:repository scope")
 
-    monkeypatch.setattr(GiteaClient, "post_issue_comment", fake_post_issue_comment)
-    monkeypatch.setattr(GiteaClient, "approve_pr", fake_approve_pr_fails)
-    monkeypatch.setattr(GiteaClient, "close", lambda self: None)
+    monkeypatch.setattr(GitHubClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GitHubClient, "approve_pr", fake_approve_pr_fails)
+    monkeypatch.setattr(GitHubClient, "close", lambda self: None)
 
     state = dict(_RENOVATE_INITIAL)
     state.update({
@@ -563,7 +563,7 @@ def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
 
 
 class _FakeActivityClient:
-    """Fake GiteaClient exposing comments + reviews for new_steering_inputs."""
+    """Fake GitHubClient exposing comments + reviews for new_steering_inputs."""
 
     def __init__(self, comments=None, reviews=None, review_comments=None):
         self._comments = comments or []
@@ -674,14 +674,14 @@ class _FakeTriageClient:
         pass
 
 
-def test_ur_triage_first_run_routes_full_without_gitea(monkeypatch):
-    """No prior verdict → full pipeline, and NO Gitea calls are made."""
+def test_ur_triage_first_run_routes_full_without_github(monkeypatch):
+    """No prior verdict → full pipeline, and NO GitHub calls are made."""
     from ops_agent.graphs.update_review.nodes import triage as tri
 
     def _boom():
-        raise AssertionError("triage must not touch Gitea on the first run")
+        raise AssertionError("triage must not touch GitHub on the first run")
 
-    monkeypatch.setattr(tri, "GiteaClient", _boom)
+    monkeypatch.setattr(tri, "GitHubClient", _boom)
 
     out = tri.triage({"verdict": None})
     assert out["_route"] == "full"
@@ -692,8 +692,8 @@ def test_ur_triage_new_commit_routes_full(monkeypatch):
     """A head SHA different from the last reviewed one → full re-review."""
     from ops_agent.graphs.update_review.nodes import triage as tri
 
-    client = _FakeTriageClient(pr={"commits": [{"id": "sha_new"}]}, comments=[])
-    monkeypatch.setattr(tri, "GiteaClient", lambda: client)
+    client = _FakeTriageClient(pr={"head": {"sha": "sha_new"}}, comments=[])
+    monkeypatch.setattr(tri, "GitHubClient", lambda: client)
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
 
     out = tri.triage({
@@ -710,8 +710,8 @@ def test_ur_triage_new_comment_routes_comment(monkeypatch):
     comments = [
         {"id": 7, "user": {"login": "human"}, "created_at": "2024-03-01T00:00:00Z", "body": "recheck plz"},
     ]
-    client = _FakeTriageClient(pr={"commits": [{"id": "sha_old"}]}, comments=comments)
-    monkeypatch.setattr(tri, "GiteaClient", lambda: client)
+    client = _FakeTriageClient(pr={"head": {"sha": "sha_old"}}, comments=comments)
+    monkeypatch.setattr(tri, "GitHubClient", lambda: client)
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
 
     out = tri.triage({
@@ -730,8 +730,8 @@ def test_ur_triage_self_comment_is_no_change(monkeypatch):
     comments = [
         {"id": 8, "user": {"login": "ops-agent"}, "created_at": "2024-03-01T00:00:00Z", "body": "our review"},
     ]
-    client = _FakeTriageClient(pr={"commits": [{"id": "sha_old"}]}, comments=comments)
-    monkeypatch.setattr(tri, "GiteaClient", lambda: client)
+    client = _FakeTriageClient(pr={"head": {"sha": "sha_old"}}, comments=comments)
+    monkeypatch.setattr(tri, "GitHubClient", lambda: client)
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
 
     out = tri.triage({
@@ -794,8 +794,8 @@ def test_ur_redrive_light_path_no_double_evidence(monkeypatch):
     comments = [
         {"id": 9, "user": {"login": "human"}, "created_at": "2024-03-01T00:00:00Z", "body": "are you sure?"},
     ]
-    monkeypatch.setattr(tri, "GiteaClient", lambda: _FakeTriageClient(
-        pr={"commits": [{"id": "sha1"}]}, comments=comments))
+    monkeypatch.setattr(tri, "GitHubClient", lambda: _FakeTriageClient(
+        pr={"head": {"sha": "sha1"}}, comments=comments))
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
     # classify picks the cheap path.
     monkeypatch.setattr(cc, "get_llm", lambda _p: (_ for _ in ()).throw(RuntimeError("x")))
@@ -840,8 +840,8 @@ def test_ur_redrive_idle_tick_is_noop(monkeypatch):
 
     # Idle: only our own comment exists, head unchanged.
     comments = [{"id": 2, "user": {"login": "ops-agent"}, "created_at": "2024-02-01T00:00:00Z", "body": "review"}]
-    monkeypatch.setattr(tri, "GiteaClient", lambda: _FakeTriageClient(
-        pr={"commits": [{"id": "sha1"}]}, comments=comments))
+    monkeypatch.setattr(tri, "GitHubClient", lambda: _FakeTriageClient(
+        pr={"head": {"sha": "sha1"}}, comments=comments))
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
 
     graph = ur.build_graph()
@@ -859,10 +859,10 @@ def test_ur_redrive_idle_tick_is_noop(monkeypatch):
 
 
 def test_sd_triage_first_run_routes_full(monkeypatch):
-    """No PR yet → full scaffold, no Gitea calls."""
+    """No PR yet → full scaffold, no GitHub calls."""
     from ops_agent.graphs.service_deploy.nodes import triage as tri
 
-    monkeypatch.setattr(tri, "GiteaClient", lambda: (_ for _ in ()).throw(AssertionError("no gitea")))
+    monkeypatch.setattr(tri, "GitHubClient", lambda: (_ for _ in ()).throw(AssertionError("no github")))
     out = tri.triage({"pr_url": None, "pr_index": None})
     assert out["_route"] == "full"
 
@@ -872,7 +872,7 @@ def test_sd_triage_steer_resets_review_budget(monkeypatch):
     from ops_agent.graphs.service_deploy.nodes import triage as tri
 
     comments = [{"id": 4, "user": {"login": "human"}, "created_at": "2024-03-01T00:00:00Z", "body": "use 2 replicas"}]
-    monkeypatch.setattr(tri, "GiteaClient", lambda: _FakeTriageClient(comments=comments))
+    monkeypatch.setattr(tri, "GitHubClient", lambda: _FakeTriageClient(comments=comments))
     monkeypatch.setattr(tri, "get_bot_login", lambda: "ops-agent")
 
     out = tri.triage({
@@ -933,7 +933,7 @@ def test_sd_commit_pushes_to_existing_pr(monkeypatch, tmp_path):
         def close(self):
             pass
 
-    monkeypatch.setattr(cp, "GiteaClient", lambda: _FakeClient())
+    monkeypatch.setattr(cp, "GitHubClient", lambda: _FakeClient())
 
     result = cp.commit_and_pr({
         "_owner": "o", "_repo": "r",
@@ -962,7 +962,7 @@ def test_sd_commit_opens_pr_on_first_run(monkeypatch, tmp_path):
         def close(self):
             pass
 
-    monkeypatch.setattr(cp, "GiteaClient", lambda: _FakeClient())
+    monkeypatch.setattr(cp, "GitHubClient", lambda: _FakeClient())
 
     result = cp.commit_and_pr({
         "_owner": "o", "_repo": "r",
@@ -995,7 +995,7 @@ def test_sd_commit_raises_on_rejected_push(monkeypatch, tmp_path):
         def close(self):
             pass
 
-    monkeypatch.setattr(cp, "GiteaClient", lambda: _FakeClient())
+    monkeypatch.setattr(cp, "GitHubClient", lambda: _FakeClient())
 
     with pytest.raises(RuntimeError, match="Failed to push"):
         cp.commit_and_pr({

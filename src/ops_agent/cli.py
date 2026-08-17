@@ -62,10 +62,10 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
             print(f"Error reading prompt file: {exc}", file=sys.stderr)
             sys.exit(1)
     elif hasattr(args, 'issue') and args.issue:
-        from ops_agent.tools.gitea import GiteaClient
+        from ops_agent.tools.github import GitHubClient
 
         try:
-            client = GiteaClient()
+            client = GitHubClient()
             try:
                 issue = client.get_issue(args.owner, args.repo, args.issue)
                 prompt = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
@@ -107,6 +107,12 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """Entry point for the ops-agent CLI."""
+    # Windows consoles default to a legacy codepage (e.g. cp1252) that can't
+    # encode characters like the arrows LLM output often contains; force UTF-8
+    # so printing verdict/summary text never crashes after the graph succeeds.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     load_dotenv()
     log_level = logging.DEBUG if os.getenv("DEBUG") else logging.INFO
     logging.basicConfig(
@@ -126,8 +132,8 @@ def main() -> None:
         "review-pr",
         help="Review a Renovate dependency-update PR and post a verdict comment.",
     )
-    review_p.add_argument("--owner", required=True, metavar="OWNER", help="Gitea repo owner")
-    review_p.add_argument("--repo", required=True, metavar="REPO", help="Gitea repo name")
+    review_p.add_argument("--owner", required=True, metavar="OWNER", help="GitHub repo owner")
+    review_p.add_argument("--repo", required=True, metavar="REPO", help="GitHub repo name")
     review_p.add_argument(
         "--pr", required=True, type=int, metavar="N", help="PR index (integer)"
     )
@@ -136,7 +142,7 @@ def main() -> None:
     # --- scaffold ---
     scaffold_p = sub.add_parser(
         "scaffold",
-        help="Scaffold a deployment from a natural-language prompt and open a Gitea PR.",
+        help="Scaffold a deployment from a natural-language prompt and open a GitHub PR.",
     )
     prompt_grp = scaffold_p.add_mutually_exclusive_group(required=True)
     prompt_grp.add_argument("--prompt", metavar="TEXT", help="Deployment request as inline text")
@@ -147,10 +153,10 @@ def main() -> None:
         "--issue",
         type=int,
         metavar="N",
-        help="Gitea issue number (requires --owner and --repo)",
+        help="GitHub issue number (requires --owner and --repo)",
     )
-    scaffold_p.add_argument("--owner", metavar="OWNER", help="Gitea repo owner (required with --issue)")
-    scaffold_p.add_argument("--repo", metavar="REPO", help="Gitea repo name (required with --issue)")
+    scaffold_p.add_argument("--owner", metavar="OWNER", help="GitHub repo owner (required with --issue)")
+    scaffold_p.add_argument("--repo", metavar="REPO", help="GitHub repo name (required with --issue)")
     scaffold_p.add_argument(
         "--id",
         metavar="ID",

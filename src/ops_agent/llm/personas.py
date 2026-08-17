@@ -38,23 +38,35 @@ PERSONAS: dict[str, PersonaParams] = {
 def get_llm(persona: str) -> ChatOpenAI:
     """Return a ChatOpenAI client bound with the named persona's sampling params.
 
-    temperature and top_p are standard OpenAI params passed as kwargs.
-    top_k, presence_penalty, and chat_template_kwargs are llama.cpp extensions
-    sent via extra_body so they reach the model server unmodified.
+    The endpoint is OpenAI-compatible. Configure it with LLM_PROVIDER,
+    LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL; the legacy LLAMACPP_BASE_URL /
+    LLAMACPP_API_KEY / MODEL_ALIAS variables are used as fallbacks.
+
+    Provider profiles:
+
+    - ``llamacpp`` (default): temperature and top_p are standard params;
+      top_k, presence_penalty, and ``chat_template_kwargs.enable_thinking`` are
+      llama.cpp/Qwen3 extensions sent via extra_body.
+    - ``openai-compatible``: standard OpenAI params only (temperature, top_p) —
+      safe for any /v1 server that rejects unknown body fields.
     """
     settings = get_settings()
     params = PERSONAS[persona]
 
-    return ChatOpenAI(
-        base_url=settings.llamacpp_base_url,
-        model=settings.model_alias,
-        api_key=settings.llamacpp_api_key,
-        timeout=settings.request_timeout_seconds,
-        temperature=params.temperature,
-        top_p=params.top_p,
-        extra_body={
+    kwargs: dict = {
+        "base_url": settings.llm_base_url or settings.llamacpp_base_url,
+        "model": settings.llm_model or settings.model_alias,
+        "api_key": settings.llm_api_key or settings.llamacpp_api_key,
+        "timeout": settings.request_timeout_seconds,
+        "temperature": params.temperature,
+        "top_p": params.top_p,
+    }
+
+    if settings.llm_provider == "llamacpp":
+        kwargs["extra_body"] = {
             "top_k": params.top_k,
             "presence_penalty": params.presence_penalty,
             "chat_template_kwargs": {"enable_thinking": params.enable_thinking},
-        },
-    )
+        }
+
+    return ChatOpenAI(**kwargs)
