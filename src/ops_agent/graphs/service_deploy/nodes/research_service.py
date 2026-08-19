@@ -5,8 +5,8 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState

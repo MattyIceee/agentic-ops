@@ -36,6 +36,11 @@ packages = ["src/ops_agent"]
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+# Graph nodes and CLI entry points intentionally catch Exception and degrade
+# gracefully instead of crashing the run — see docs/NODE_ERROR_HANDLING.md.
+extend-ignore = ["BLE001"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

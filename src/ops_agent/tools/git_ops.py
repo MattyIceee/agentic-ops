@@ -19,7 +19,7 @@ def read_diff(repo_path: str, ref_a: str = "HEAD~1", ref_b: str = "HEAD") -> str
         return f"git diff error: {exc}"
     except git.InvalidGitRepositoryError:
         return f"Not a git repository: {repo_path}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Unexpected error reading diff: {exc}"
 
 
@@ -35,7 +35,7 @@ def create_branch(repo_path: str, branch: str) -> str:
         return f"git branch error: {exc}"
     except git.InvalidGitRepositoryError:
         return f"Not a git repository: {repo_path}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Unexpected error creating branch: {exc}"
 
 
@@ -55,7 +55,7 @@ def commit_all(repo_path: str, message: str) -> str:
         return f"git commit error: {exc}"
     except git.InvalidGitRepositoryError:
         return f"Not a git repository: {repo_path}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Unexpected error committing: {exc}"
 
 
@@ -78,7 +78,7 @@ def push_branch(repo_path: str, branch: str, remote: str = "origin") -> str:
         return f"git push error: {exc}"
     except git.InvalidGitRepositoryError:
         return f"Not a git repository: {repo_path}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"Unexpected error pushing: {exc}"
 
 

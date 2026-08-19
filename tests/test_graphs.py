@@ -539,8 +539,11 @@ def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
     def fake_post_issue_comment(self, owner, repo, index, body):
         return {"id": 1}
 
+    class ApprovalScopeError(Exception):
+        """Simulates a GitHub token lacking write:repository scope."""
+
     def fake_approve_pr_fails(self, owner, repo, index, body="LGTM"):
-        raise Exception("Authorization failed: token needs write:repository scope")
+        raise ApprovalScopeError("Authorization failed: token needs write:repository scope")
 
     monkeypatch.setattr(GitHubClient, "post_issue_comment", fake_post_issue_comment)
     monkeypatch.setattr(GitHubClient, "approve_pr", fake_approve_pr_fails)
@@ -828,10 +831,11 @@ def test_classify_comment_defaults_to_light_on_llm_failure(monkeypatch):
 def test_ur_redrive_light_path_no_double_evidence(monkeypatch):
     """A comment-driven light re-drive re-judges without re-researching and
     without duplicating the accumulating evidence channel."""
+    from langgraph.checkpoint.memory import MemorySaver
+
     import ops_agent.graphs.update_review.update_review as ur
     from ops_agent.graphs.update_review.nodes import classify_comment as cc
     from ops_agent.graphs.update_review.nodes import triage as tri
-    from langgraph.checkpoint.memory import MemorySaver
 
     # Compile with an in-memory checkpointer so state persists across turns.
     saver = MemorySaver()
@@ -883,9 +887,10 @@ def test_ur_redrive_light_path_no_double_evidence(monkeypatch):
 
 def test_ur_redrive_idle_tick_is_noop(monkeypatch):
     """No new commit and no foreign comment → triage ends the run untouched."""
+    from langgraph.checkpoint.memory import MemorySaver
+
     import ops_agent.graphs.update_review.update_review as ur
     from ops_agent.graphs.update_review.nodes import triage as tri
-    from langgraph.checkpoint.memory import MemorySaver
 
     saver = MemorySaver()
     monkeypatch.setattr("ops_agent.checkpointing.get_checkpoint_saver", lambda: saver)

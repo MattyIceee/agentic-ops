@@ -1,6 +1,7 @@
 """Node: generate_kustomize - generates Kustomize manifests."""
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -10,6 +11,8 @@ from ops_agent.graphs.interactive import steer_block as _steer_block
 from ops_agent.llm.personas import get_llm
 from ops_agent.state import ServiceDeployState
 from ops_agent.types import EvidenceItem
+
+logger = logging.getLogger(__name__)
 
 _KUSTOMIZE_SYSTEM = """\
 You are a Kustomize manifest generator. Generate Kubernetes manifests to deploy a
@@ -47,7 +50,7 @@ def _extract_manifests(llm_output: str) -> dict[str, str]:
             if isinstance(data, dict) and all(isinstance(v, str) for v in data.values()):
                 return data
     except Exception:
-        pass
+        logger.debug("no JSON object found in LLM output; storing raw output")
     return {"output.yaml": llm_output}
 
 

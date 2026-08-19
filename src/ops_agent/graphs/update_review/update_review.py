@@ -39,8 +39,8 @@ from typing import Any, Literal
 
 from langgraph.graph import END, StateGraph
 
-from ops_agent.graphs.update_review.nodes.assess_risk import assess_risk
 from ops_agent.graphs.update_review.nodes.assemble_verdict import assemble_verdict
+from ops_agent.graphs.update_review.nodes.assess_risk import assess_risk
 from ops_agent.graphs.update_review.nodes.classify_comment import classify_comment
 from ops_agent.graphs.update_review.nodes.extract_breaking_changes import extract_breaking_changes
 from ops_agent.graphs.update_review.nodes.ingest_pr import ingest_pr
@@ -197,8 +197,8 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
             # Case 1: no checkpoint -> fresh run.
             logger.debug("Starting fresh execution (thread_id=%s)", thread_id)
             final_state = compiled.invoke(initial_state, config)
-    except Exception as e:
-        logger.error("Graph execution failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("Graph execution failed")
         raise
 
     if final_state is None:

@@ -177,7 +177,7 @@ def github_get_pr(owner: str, repo: str, index: int) -> str:
     client = GitHubClient()
     try:
         return json.dumps(client.get_pr(owner, repo, index), indent=2)
-    except Exception as exc:  # noqa: BLE001 - tools return error strings, never raise
+    except Exception as exc:
         return f"Error fetching PR: {exc}"
     finally:
         client.close()
@@ -200,7 +200,7 @@ def github_post_comment(owner: str, repo: str, index: int, body: str) -> str:
     try:
         result = client.post_issue_comment(owner, repo, index, body)
         return f"Comment posted (id={result.get('id', '?')})"
-    except Exception as exc:  # noqa: BLE001 - tools return error strings, never raise
+    except Exception as exc:
         return f"Error posting comment: {exc}"
     finally:
         client.close()
@@ -232,7 +232,7 @@ def github_create_pr(
     try:
         result = client.create_pr(owner, repo, title, body, head, base)
         return result.get("html_url", str(result))
-    except Exception as exc:  # noqa: BLE001 - tools return error strings, never raise
+    except Exception as exc:
         return f"Error creating PR: {exc}"
     finally:
         client.close()
@@ -255,7 +255,7 @@ def github_approve_pr(owner: str, repo: str, index: int, body: str = "LGTM") -> 
     try:
         result = client.approve_pr(owner, repo, index, body)
         return f"PR approved (review_id={result.get('id', '?')})"
-    except Exception as exc:  # noqa: BLE001 - tools return error strings, never raise
+    except Exception as exc:
         return f"Error approving PR: {exc}"
     finally:
         client.close()

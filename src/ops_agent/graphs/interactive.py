@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ops_agent.tools.github import GitHubClient
@@ -56,10 +56,10 @@ def _parse_ts(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(raw)
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _activity(kind: str, ref: Any, author: str | None, text: str, ts_raw: str, state: str = "") -> dict:

@@ -52,6 +52,7 @@ def _scan_namespaces(repo_dir: Path) -> list[str]:
             try:
                 text = (Path(root) / fname).read_text(encoding="utf-8")
             except Exception:
+                logger.debug("skipping unreadable file %s", Path(root) / fname)
                 continue
 
             parsed = False
@@ -121,7 +122,7 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
                     content = fpath.read_text(encoding="utf-8")
                     sample_files[str(fpath.relative_to(repo_dir))] = content[:1500]
                 except Exception:
-                    pass
+                    logger.debug("skipping unreadable sample file %s", fpath)
 
     structure = "\n".join(structure_lines[:120])
     samples_block = "\n\n".join(

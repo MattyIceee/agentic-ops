@@ -7,8 +7,6 @@ GitHubClient tests mock the githubkit transport so no network is required.
 from __future__ import annotations
 
 import git
-import pytest
-
 
 # ─────────────────────────── helpers ───────────────────────────────────────
 

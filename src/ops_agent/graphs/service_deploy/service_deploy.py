@@ -252,8 +252,8 @@ def run(
             # No checkpoint -> fresh run.
             logger.debug("Starting fresh execution (thread_id=%s)", checkpoint_id)
             final_state = compiled.invoke(initial_state, config)
-    except Exception as e:
-        logger.error("Graph execution failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("Graph execution failed")
         raise
 
     if final_state is None:

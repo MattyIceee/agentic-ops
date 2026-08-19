@@ -230,13 +230,13 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
             committer=author,
         )
         _push_branch(repo, branch)
-    except Exception as exc:
+    except Exception:
         # Re-raise so the graph does NOT checkpoint this as a completed run.
         # Swallowing the error into pr_url makes LangGraph mark the thread
         # "finished", which permanently caches the failure and blocks retries.
         # Raising leaves commit_and_pr as the pending node so a later run
         # resumes here (or use --fresh to start over).
-        logger.error("Git operation failed: %s", exc, exc_info=True)
+        logger.exception("Git operation failed")
         raise
 
     existing_pr_index = state.get("pr_index")
@@ -277,7 +277,7 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
         finally:
             client.close()
     except Exception as exc:
-        logger.error("PR creation failed: %s", exc, exc_info=True)
+        logger.exception("PR creation failed")
         return {"pr_url": f"Branch pushed but PR creation failed: {exc}"}
 
     return {"pr_url": pr_url, "pr_index": pr_index, "pr_branch": branch}
