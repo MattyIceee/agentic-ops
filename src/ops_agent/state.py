@@ -30,6 +30,7 @@ class UpdateReviewState(TypedDict):
     _findings: list[Finding]
     _risk: RiskAssessment | None
     verdict: Verdict | None
+    _quote: str | None  # RAG-retrieved quote appended to the posted comment, if any
     posted: bool
     # Interactive re-drive: triage gathers this turn's new external input
     # (foreign comments, stored as plain dicts for checkpoint serialization) and

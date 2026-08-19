@@ -73,6 +73,19 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_base_url: str = "http://localhost:3000"
 
+    # Vector store (Chroma) — quote RAG for PR review comments.
+    # Embeddings reuse the LLM_BASE_URL/LLM_API_KEY endpoint above; only the
+    # embedding model name differs.
+    vector_db_enabled: bool = True
+    chroma_url: str = "http://localhost:8000"
+    chroma_collection: str = "bee_movie_quotes"
+    embedding_model: str = "text-embedding-qwen3-embedding-0.6b"
+
+    # Whether review-pr appends a RAG quote to posted PR comments. Independent
+    # of vector_db_enabled so the store/ingestion can stay up while the
+    # annotation itself is toggled off without touching infra.
+    pr_quote_annotations_enabled: bool = True
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:

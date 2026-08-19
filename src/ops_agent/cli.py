@@ -46,6 +46,21 @@ def _cmd_review_pr(args: argparse.Namespace) -> None:
             print(f"    Quote: {finding.quote!r}")
 
 
+def _cmd_ingest_quotes(args: argparse.Namespace) -> None:
+    """Fetch a gist, chunk it, and upsert embeddings into the Chroma vector store."""
+    _require_settings()
+
+    from ops_agent.rag.quotes import ingest_script
+
+    try:
+        count = ingest_script(gist_id=args.gist_id)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Ingested {count} chunk(s) into the vector store.")
+
+
 def _cmd_scaffold(args: argparse.Namespace) -> None:
     """Run Graph B: scaffold a deployment from a prompt and open a PR."""
     _require_settings()
@@ -138,6 +153,19 @@ def main() -> None:
         "--pr", required=True, type=int, metavar="N", help="PR index (integer)"
     )
     review_p.set_defaults(func=_cmd_review_pr)
+
+    # --- ingest-quotes ---
+    ingest_p = sub.add_parser(
+        "ingest-quotes",
+        help="Fetch a gist, chunk it, and upsert embeddings into the Chroma vector store.",
+    )
+    ingest_p.add_argument(
+        "--gist-id",
+        default="045239bc27b16b2bcf7a3a9a4648c08a",
+        metavar="ID",
+        help="GitHub gist ID to ingest (defaults to the Bee Movie script gist)",
+    )
+    ingest_p.set_defaults(func=_cmd_ingest_quotes)
 
     # --- scaffold ---
     scaffold_p = sub.add_parser(

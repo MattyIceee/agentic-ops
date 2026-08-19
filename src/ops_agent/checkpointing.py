@@ -11,6 +11,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 logger = logging.getLogger(__name__)
 
 ALLOWED_MSGPACK_MODULES = [
+    ("ops_agent.types.findings", "Finding"),
     ("ops_agent.types.findings", "RiskAssessment"),
     ("ops_agent.types.findings", "Verdict"),
     ("ops_agent.types.evidence", "EvidenceItem"),

@@ -80,9 +80,12 @@ def ingest_pr(state: UpdateReviewState) -> dict[str, Any]:
     body: str = pr.get("body", "") or ""
 
     # Renovate PR titles look like: "chore(deps): update dependency foo to v1.2.3"
-    # We extract dependency name + versions with a best-effort regex.
+    # Docker-tag titles insert "docker tag" between the name and "to":
+    # "chore(deps): update postgres docker tag to v15". We extract dependency
+    # name + versions with a best-effort regex.
     dep_match = re.search(
-        r"update\s+(?:dependency\s+)?([^\s]+)\s+(?:from\s+v?(\S+)\s+)?to\s+v?(\S+)",
+        r"update\s+(?:dependency\s+)?(.+?)(?:\s+docker\s+tag)?"
+        r"\s+(?:from\s+v?(\S+)\s+)?to\s+v?(\S+)",
         title,
         re.IGNORECASE,
     )

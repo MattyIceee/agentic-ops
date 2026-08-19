@@ -50,6 +50,7 @@ _RENOVATE_INITIAL: dict = {
     "_findings": [],
     "_risk": None,
     "verdict": None,
+    "_quote": None,
     "posted": False,
 }
 
@@ -73,6 +74,7 @@ def test_renovate_graph_clear_path(monkeypatch):
     # Return empty dict → _findings absent → assemble_verdict defaults to []
     monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {})
     monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    monkeypatch.setattr(rr, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_graph()
@@ -102,6 +104,7 @@ def test_renovate_findings_propagate_to_verdict(monkeypatch):
     })
     monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {"_findings": [finding]})
     monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    monkeypatch.setattr(rr, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_graph()
@@ -125,6 +128,7 @@ def test_renovate_graph_regression_path(monkeypatch):
     })
     monkeypatch.setattr(rr, "extract_breaking_changes", lambda s: {})
     monkeypatch.setattr(rr, "assess_risk", lambda s: {})
+    monkeypatch.setattr(rr, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_graph()
@@ -151,6 +155,7 @@ def test_renovate_graph_reasoned_risk_path(monkeypatch):
                                 rationale="Major-version rewrite with config changes.",
                                 signals=["1.x → 2.x major bump", "config format changed"]),
     })
+    monkeypatch.setattr(rr, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_graph()
@@ -183,6 +188,7 @@ def test_renovate_graph_breaking_path(monkeypatch):
     monkeypatch.setattr(rr, "assemble_verdict", lambda s: {
         "verdict": Verdict(decision="breaking", findings=[finding], summary="1 breaking change found."),
     })
+    monkeypatch.setattr(rr, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(rr, "post_review", lambda s: {"posted": True})
 
     graph = rr.build_graph()
@@ -559,6 +565,63 @@ def test_post_review_approval_failure_does_not_fail_post(monkeypatch):
     assert result["posted"] is True
 
 
+def test_post_review_appends_quote_when_present(monkeypatch):
+    """A non-None _quote is appended as a footer line on the posted comment."""
+    from ops_agent.graphs.update_review.nodes.post_review import post_review
+    from ops_agent.tools.github import GitHubClient
+
+    posted_bodies = []
+
+    def fake_post_issue_comment(self, owner, repo, index, body):
+        posted_bodies.append(body)
+        return {"id": 1}
+
+    monkeypatch.setattr(GitHubClient, "post_issue_comment", fake_post_issue_comment)
+    monkeypatch.setattr(GitHubClient, "approve_pr", lambda self, *a, **k: {"id": 2})
+    monkeypatch.setattr(GitHubClient, "close", lambda self: None)
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "requests",
+        "current_version": "2.28.0",
+        "new_version": "2.32.0",
+        "_quote": "mock quote text",
+        "verdict": Verdict(decision="clear", findings=[], summary="No breaking changes found."),
+    })
+
+    post_review(state)
+
+    assert "mock quote text" in posted_bodies[0]
+
+
+def test_post_review_omits_quote_footer_when_none(monkeypatch):
+    """A None _quote (annotations disabled or lookup failed) adds no footer."""
+    from ops_agent.graphs.update_review.nodes.post_review import post_review
+    from ops_agent.tools.github import GitHubClient
+
+    posted_bodies = []
+
+    monkeypatch.setattr(
+        GitHubClient, "post_issue_comment",
+        lambda self, owner, repo, index, body: posted_bodies.append(body) or {"id": 1},
+    )
+    monkeypatch.setattr(GitHubClient, "approve_pr", lambda self, *a, **k: {"id": 2})
+    monkeypatch.setattr(GitHubClient, "close", lambda self: None)
+
+    state = dict(_RENOVATE_INITIAL)
+    state.update({
+        "dependency": "requests",
+        "current_version": "2.28.0",
+        "new_version": "2.32.0",
+        "_quote": None,
+        "verdict": Verdict(decision="clear", findings=[], summary="No breaking changes found."),
+    })
+
+    post_review(state)
+
+    assert "🐝" not in posted_bodies[0]
+
+
 # ─────────────────── interactive re-drive: shared helpers ───────────────────
 
 
@@ -788,6 +851,7 @@ def test_ur_redrive_light_path_no_double_evidence(monkeypatch):
     monkeypatch.setattr(ur, "research", stub_research)
     monkeypatch.setattr(ur, "extract_breaking_changes", lambda s: {})
     monkeypatch.setattr(ur, "assess_risk", lambda s: {})
+    monkeypatch.setattr(ur, "pick_quote", lambda s: {"_quote": None})
     monkeypatch.setattr(ur, "post_review", lambda s: {"posted": True})
 
     # Second turn: triage sees a new foreign comment (no new commit).
@@ -834,6 +898,7 @@ def test_ur_redrive_idle_tick_is_noop(monkeypatch):
         "evidence": [EvidenceItem(source="c", url=None, text="n")]})
     monkeypatch.setattr(ur, "extract_breaking_changes", lambda s: {})
     monkeypatch.setattr(ur, "assess_risk", lambda s: {})
+    monkeypatch.setattr(ur, "pick_quote", lambda s: {"_quote": None})
 
     post_calls: list[int] = []
     monkeypatch.setattr(ur, "post_review", lambda s: post_calls.append(1) or {"posted": True})

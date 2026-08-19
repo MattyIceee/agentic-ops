@@ -159,9 +159,28 @@ services:
       retries: 5
       start_period: 5s
 
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: ops-agent-chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ops_agent_chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   ops_agent_postgres_data:
   ops_agent_clickhouse_data:
   ops_agent_clickhouse_logs:
   ops_agent_redis_data:
   ops_agent_minio_data:
+  ops_agent_chroma_data:

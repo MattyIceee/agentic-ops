@@ -4,7 +4,7 @@ Interactive, re-drivable graph. A deterministic ``triage`` entry node runs on
 every invocation and routes:
 
   triage ─▶ full     → ingest_pr → research → extract_breaking_changes
-          │            → assess_risk → assemble_verdict → post_review → END
+          │            → assess_risk → assemble_verdict → pick_quote → post_review → END
           ├▶ comment  → classify_comment ─▶ full  → ingest_pr (as above)
           │                               └▶ light → assess_risk → … → post_review
           └▶ none     → END
@@ -23,6 +23,9 @@ every invocation and routes:
                             overrides, the verbatim findings
 - assemble_verdict:        pure Python decision logic, incl. a deterministic
                             downgrade / version-scheme check
+- pick_quote:              RAG lookup for an optional quote appended to the
+                            comment (no LLM; toggled by
+                            pr_quote_annotations_enabled)
 - post_review:             posts markdown comment via GitHubClient (no LLM)
 
 Checkpointing preserves prior evidence/verdict across turns, so a comment-driven
@@ -41,6 +44,7 @@ from ops_agent.graphs.update_review.nodes.assemble_verdict import assemble_verdi
 from ops_agent.graphs.update_review.nodes.classify_comment import classify_comment
 from ops_agent.graphs.update_review.nodes.extract_breaking_changes import extract_breaking_changes
 from ops_agent.graphs.update_review.nodes.ingest_pr import ingest_pr
+from ops_agent.graphs.update_review.nodes.pick_quote import pick_quote
 from ops_agent.graphs.update_review.nodes.post_review import post_review
 from ops_agent.graphs.update_review.nodes.research import research
 from ops_agent.graphs.update_review.nodes.triage import triage
@@ -88,6 +92,7 @@ def build_graph() -> Any:
     graph.add_node("extract_breaking_changes", extract_breaking_changes)
     graph.add_node("assess_risk", assess_risk)
     graph.add_node("assemble_verdict", assemble_verdict)
+    graph.add_node("pick_quote", pick_quote)
     graph.add_node("post_review", post_review)
 
     graph.set_entry_point("triage")
@@ -109,7 +114,8 @@ def build_graph() -> Any:
     graph.add_edge("research", "extract_breaking_changes")
     graph.add_edge("extract_breaking_changes", "assess_risk")
     graph.add_edge("assess_risk", "assemble_verdict")
-    graph.add_edge("assemble_verdict", "post_review")
+    graph.add_edge("assemble_verdict", "pick_quote")
+    graph.add_edge("pick_quote", "post_review")
     graph.add_edge("post_review", END)
 
     checkpointer = get_checkpoint_saver()
@@ -160,6 +166,7 @@ def run(pr_index: int, owner: str, repo: str, thread_id: str | None = None) -> V
         "_findings": [],
         "_risk": None,
         "verdict": None,
+        "_quote": None,
         "posted": False,
         "new_inputs": [],
         "turn": 0,

@@ -111,6 +111,11 @@ def _build_comment(state: UpdateReviewState) -> str:
     if turn > 0:
         footer = f"*Re-review #{turn} by ops-agent — prompted by a follow-up comment*"
     comment += f"\n\n---\n{footer}"
+
+    quote = state.get("_quote")
+    if quote:
+        comment += f"\n\n> 🐝 {quote}"
+
     return comment
 
 
