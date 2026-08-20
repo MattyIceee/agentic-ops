@@ -1,5 +1,13 @@
 # ops-agent
 
+> **AI-assisted development.** This repository was written with AI assistance:
+> - Opus 5 / Sonnet 5 — architecture and planning
+> - Deepseek 4 Flash — primary implementor
+> - Qwen 38 27b — linting and test validation
+> - Sonnet 5 — general bug fixes
+>
+> All code is reviewed, validated, and tested by a human.
+
 An agentic ops pipeline for a self-hosted homelab. Two LangGraph graphs share a common set of tools and personas to automate two recurring ops tasks:
 
 1. **Renovate PR reviewer** — annotates dependency-bump PRs opened by Renovate with breaking-change findings extracted from changelogs and release notes, then posts a verdict comment on the GitHub PR.
@@ -10,6 +18,12 @@ Renovate's Merge Confidence rating remains the primary auto-merge gate. This age
 ---
 
 ## Architecture
+
+### Graph diagram
+
+[![Video walkthrough of this repo](video-thumbnail.jpg)](https://drive.google.com/file/d/1kZ8I4UIAB4gspIPD-i85_THcqaCHXrFp/view?usp=sharing)
+
+![ops-agent graph diagram: Renovate/IaC flow, quote ingestion pipeline, and the review-pr and scaffold graphs with their nodes and routing](agentic-ops.png)
 
 ```
 ops-agent/
@@ -37,6 +51,20 @@ Extraction nodes never fabricate — each `Finding` requires a verbatim quote ti
 
 ---
 
+## Design notes
+
+**Veto, not merge, for Graph A.** Renovate's Merge Confidence rating stays the primary auto-merge gate. Graph A can only comment and (where GitHub allows it) approve — it can never merge or block a PR outright. Dependency bumps are exactly the kind of change where a wrong auto-action is expensive and a wrong comment is cheap, so the agent's authority is scoped to match that asymmetry.
+
+**Personas are sampling params, not model swaps.** One model, four parameter bundles (`research` / `coding` / `extract` / `instruct`, see table above). Extraction and formatting run with `enable_thinking=False` since they're bounded transformations, not open-ended reasoning — this keeps latency down on the steps that run most often without touching model choice.
+
+**Self-review retry loop on Graph B**, not single-shot generation. Manifest generation self-reviews its own output against the target repo's existing conventions and retries up to twice before opening a PR. Generation-then-critique caught more convention drift in testing than trying to get the prompt right on the first pass.
+
+**Postgres-backed checkpointing.** Both graphs compile with a `langgraph-checkpoint-postgres` checkpointer, so a crashed or interrupted run (a flaky GitHub API call mid-PR, a restart) resumes from its last completed node instead of restarting from scratch.
+
+**The RAG feature quotes the Bee Movie script.** `pick_quote` (in Graph A) runs real retrieval — a Chroma vector store, `langchain-text-splitters` chunking, and OpenAI embeddings — over the Bee Movie script, and appends the closest-matching line to posted PR comments. This is a deliberate choice, not a placeholder: it's a legitimate excuse to show the retrieval mechanics (ingest → chunk → embed → similarity search) end-to-end without pretending a dependency-bump reviewer needs a "knowledge base" to know what SemVer is. It's gated behind `PR_QUOTE_ANNOTATIONS_ENABLED` and fails silently (falls back to no quote) if the vector store is unreachable, so it never blocks the actual review.
+
+---
+
 ## Prerequisites
 
 All external services must be running before you start the agent.
@@ -50,6 +78,12 @@ All external services must be running before you start the agent.
 | **Flux** | GitOps runtime | Required if you use Graph B for HelmRelease-based deployments |
 
 Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/) are required on the machine running the agent.
+
+You'll also need an **IaC/GitOps repo** with Renovate (or another auto-updating
+bot) configured to open dependency-bump PRs — that's what Graph A reviews and
+Graph B commits scaffolded manifests into. If you don't have one handy, you can
+point the agents at [MattyIceee/test-deployment](https://github.com/MattyIceee/test-deployment)
+to try things out.
 
 ---
 
@@ -162,7 +196,7 @@ Evals measure breaking-change extraction precision/recall against labeled past R
 uv run python -m evals.runner
 ```
 
-On a fresh checkout this prints `no eval data yet` and exits 0. To add labeled examples, drop JSON files into `evals/data/` following the schema documented in [evals/README.md](evals/README.md).
+`evals/data/` ships with 7 labeled examples (axios, eslint, express, lodash, node-fetch, react, requests) — real changelog evidence paired with a `has_breaking_change` ground-truth label. The runner replays each example's stored evidence through the same `extract_breaking_changes` node Graph A uses in production, then prints a per-example comparison table plus precision/recall/F1 against the ground truth. Drop additional labeled JSON files into `evals/data/` following the schema documented in [evals/README.md](evals/README.md) to grow the set — if the directory is ever emptied, the runner prints `no eval data yet` and exits 0 rather than failing.
 
 ---
 
@@ -225,3 +259,12 @@ uv run ruff check src/ tests/
 # Format
 uv run ruff format src/ tests/
 ```
+
+---
+
+## What I'd improve with more time
+
+- **Eval coverage for Graph B.** The labeled dataset only covers Graph A's breaking-change extraction; the deployment scaffolder has no equivalent — e.g. golden manifests to diff generated `HelmRelease`/Kustomize output against.
+- **Redact secrets/PII before they're quoted back.** Fetched changelog and release-note text flows into posted PR comments unfiltered. Fine for public OSS changelogs today, but not safe as-is if pointed at private feeds.
+- **One-command bootstrap.** A Makefile or setup script wrapping `uv sync` + `docker compose up -d` + `.env` scaffolding, so getting a fresh checkout running is one command instead of reading the Setup section top to bottom.
+- **A second, domain-relevant RAG corpus.** The Bee Movie retrieval demonstrates the mechanics; pairing it with a "serious" one (e.g. this org's own deployment conventions or changelog-writing style) would show the same pipeline solving an actual problem, not just a fun one.
