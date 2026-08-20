@@ -1,90 +1,9 @@
-"""Tests for tools: git_ops, search, fetch, github.
+"""Tests for tools: search, fetch, github.
 
-git_ops tests use a real temporary git repo via tmp_path.
 GitHubClient tests mock the githubkit transport so no network is required.
 """
 
 from __future__ import annotations
-
-import git
-
-# ─────────────────────────── helpers ───────────────────────────────────────
-
-def _init_repo(path):
-    """Create a git repo at *path* with a single initial commit so HEAD exists."""
-    repo = git.Repo.init(str(path))
-    repo.config_writer().set_value("user", "name", "Tester").release()
-    repo.config_writer().set_value("user", "email", "tester@example.com").release()
-    (path / "README.md").write_text("initial content")
-    repo.index.add(["README.md"])
-    repo.index.commit("initial commit")
-    return repo
-
-
-# ─────────────────────────── git_ops tests ─────────────────────────────────
-
-def test_commit_all_creates_commit(tmp_path):
-    from ops_agent.tools.git_ops import commit_all
-
-    repo = _init_repo(tmp_path)
-    (tmp_path / "new_file.txt").write_text("hello world")
-
-    result = commit_all.invoke({"repo_path": str(tmp_path), "message": "add new_file"})
-
-    assert "add new_file" in result or result.startswith("Committed")
-    assert len(list(repo.iter_commits())) == 2
-
-
-def test_commit_all_nothing_to_commit(tmp_path):
-    from ops_agent.tools.git_ops import commit_all
-
-    _init_repo(tmp_path)
-    result = commit_all.invoke({"repo_path": str(tmp_path), "message": "empty"})
-
-    assert "Nothing to commit" in result
-
-
-def test_read_diff_shows_change(tmp_path):
-    from ops_agent.tools.git_ops import read_diff
-
-    repo = _init_repo(tmp_path)
-    (tmp_path / "README.md").write_text("changed content")
-    repo.index.add(["README.md"])
-    repo.index.commit("update README")
-
-    result = read_diff.invoke({"repo_path": str(tmp_path)})
-
-    # The diff must mention the changed file and include removed/added lines
-    assert "README" in result
-    assert "-initial" in result or "+changed" in result
-
-
-def test_create_branch_succeeds(tmp_path):
-    from ops_agent.tools.git_ops import create_branch
-
-    _init_repo(tmp_path)
-    result = create_branch.invoke({"repo_path": str(tmp_path), "branch": "feature/test"})
-
-    assert "feature/test" in result
-
-
-def test_push_branch_missing_remote_returns_error_string(tmp_path):
-    from ops_agent.tools.git_ops import push_branch
-
-    _init_repo(tmp_path)
-    result = push_branch.invoke({"repo_path": str(tmp_path), "branch": "main"})
-
-    # No 'origin' remote — must return an error string, not raise
-    assert isinstance(result, str)
-    assert any(word in result.lower() for word in ("remote", "error", "origin"))
-
-
-def test_get_git_tools_returns_four_tools():
-    from ops_agent.tools.git_ops import get_git_tools
-
-    tools = get_git_tools()
-    assert len(tools) == 4
-
 
 # ─────────────────────────── search / fetch tools ──────────────────────────
 
@@ -103,16 +22,29 @@ def test_get_fetch_tool_is_invocable():
     assert hasattr(tool, "invoke")
 
 
-def test_get_github_tools_returns_expected_tools():
-    from ops_agent.tools.github import get_github_tools
+def test_fetch_domain_allowed_defaults_true():
+    from ops_agent.tools.fetch import _domain_allowed
 
-    tools = get_github_tools()
-    assert {t.name for t in tools} == {
-        "github_get_pr",
-        "github_post_comment",
-        "github_create_pr",
-        "github_approve_pr",
-    }
+    assert _domain_allowed("https://example.com/x") is True
+    # Non-http schemes are always refused regardless of allow-list.
+    assert _domain_allowed("file:///etc/passwd") is False
+    assert _domain_allowed("data:text/plain,hi") is False
+    assert _domain_allowed("") is False
+
+
+def test_fetch_domain_allowed_respects_allowlist(monkeypatch):
+    from ops_agent.config import get_settings
+    from ops_agent.tools.fetch import _domain_allowed
+
+    monkeypatch.setenv("FETCH_ALLOWED_DOMAINS", "github.com,*.github.io")
+    get_settings.cache_clear()
+    try:
+        assert _domain_allowed("https://github.com/owner/repo") is True
+        assert _domain_allowed("https://docs.github.io/guide") is True
+        assert _domain_allowed("https://sub.docs.github.io/x") is True
+        assert _domain_allowed("https://example.com/") is False
+    finally:
+        get_settings.cache_clear()
 
 
 # ─────────────────────── GitHubClient endpoint test ────────────────────────

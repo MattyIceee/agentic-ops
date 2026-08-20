@@ -9,6 +9,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import untrusted_data_instruction, wrap_untrusted
 from ops_agent.state import UpdateReviewState
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.search import get_search_tool
@@ -52,11 +53,17 @@ def research(state: UpdateReviewState) -> dict[str, Any]:
         llm = get_llm("research")
         tools = [get_search_tool(), get_fetch_tool()]
 
-        agent = create_agent(llm, tools, system_prompt=_RESEARCH_SYSTEM)
+        agent = create_agent(
+            llm,
+            tools,
+            system_prompt=f"{_RESEARCH_SYSTEM}\n\n{untrusted_data_instruction()}",
+        )
 
+        # The diff preview is untrusted data (could contain hostile text) ->
+        # quarantined so it cannot read as instructions.
         user_msg = (
             f"Research the version bump: {dep} {old_v} → {new_v}.\n"
-            f"Diff preview (first 2000 chars):\n{state.get('diff', '')[:2000]}\n\n"
+            f"{wrap_untrusted('diff_preview', state.get('diff', '')[:2000])}\n\n"
             "Find and retrieve changelogs, release notes, and migration docs. "
             "Return a JSON list of objects with keys: source, url, text."
         )

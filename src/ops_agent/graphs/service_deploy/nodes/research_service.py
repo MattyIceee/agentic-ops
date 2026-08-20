@@ -9,6 +9,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import untrusted_data_instruction, wrap_untrusted
 from ops_agent.state import ServiceDeployState
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.search import get_search_tool
@@ -43,12 +44,16 @@ def research_service(state: ServiceDeployState) -> dict[str, Any]:
 
         llm = get_llm("research")
         tools = [get_search_tool(), get_fetch_tool()]
-        agent = create_agent(llm, tools, system_prompt=_RESEARCH_SERVICE_SYSTEM)
+        agent = create_agent(
+            llm,
+            tools,
+            system_prompt=f"{_RESEARCH_SERVICE_SYSTEM}\n\n{untrusted_data_instruction()}",
+        )
 
         link_block = "\n".join(f"- {url}" for url in links) if links else "(none provided)"
         user_msg = (
             f"Service to deploy: {name}\n"
-            f"Provided links:\n{link_block}\n\n"
+            f"{wrap_untrusted('provided_links', link_block)}\n\n"
             "Find: docker image name, exposed ports, required env vars, volumes, "
             "and docker-compose or install documentation. "
             "Return a JSON list of objects with keys: source, url, text."

@@ -9,10 +9,10 @@ or can the existing evidence be re-judged in light of the comment
 import logging
 from typing import Any, Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import build_agent_messages
 from ops_agent.state import UpdateReviewState
 
 logger = logging.getLogger(__name__)
@@ -51,21 +51,20 @@ def classify_comment(state: UpdateReviewState) -> dict[str, Any]:
     """Choose 'light' vs 'full' re-drive for the new comment(s)."""
     verdict = state.get("verdict")
     summary = verdict.summary if verdict else "(no prior verdict)"
+    comments_text = _comment_block(state)
 
     try:
         llm = get_llm("reason").with_structured_output(CommentScope)
-        messages = [
-            SystemMessage(content=_CLASSIFY_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"Dependency: {state['dependency']} "
-                    f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
-                    f"Prior verdict summary: {summary}\n\n"
-                    f"New comment(s):\n{_comment_block(state)}\n\n"
-                    "Decide the re-drive scope."
-                )
+        messages = build_agent_messages(
+            system=_CLASSIFY_SYSTEM,
+            untrusted_blocks=[("reviewer_comment", comments_text)],
+            trusted_tail=(
+                f"Dependency: {state['dependency']} "
+                f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
+                f"Prior verdict summary: {summary}\n\n"
+                "Decide the re-drive scope."
             ),
-        ]
+        )
         result: CommentScope = llm.invoke(messages)  # type: ignore[assignment]
         logger.info("classify_comment: %s — %s", result.scope, result.reason)
         return {"_route": result.scope}

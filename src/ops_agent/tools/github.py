@@ -1,18 +1,15 @@
-"""GitHub REST client and LangChain tools.
+"""GitHub REST client.
 
-The raw GitHubClient is usable directly by graph nodes. LangChain tool wrappers
-are exposed for operations the agent needs to call from within an AgentExecutor.
+The raw GitHubClient is usable directly by graph nodes and CLI entry points.
 """
 
 from __future__ import annotations
 
 import base64
-import json
 from typing import Self
 
 from githubkit import GitHub
 from githubkit.exception import RequestFailed
-from langchain_core.tools import tool
 
 from ops_agent.config import get_settings
 
@@ -156,111 +153,3 @@ class GitHubClient:
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
-
-# ---------------------------------------------------------------------------
-# LangChain tools
-# ---------------------------------------------------------------------------
-
-@tool
-def github_get_pr(owner: str, repo: str, index: int) -> str:
-    """Fetch metadata for a GitHub pull request.
-
-    Args:
-        owner: Repository owner (user or org name).
-        repo: Repository name.
-        index: PR number.
-
-    Returns:
-        JSON-serialisable string of the PR object.
-    """
-    client = GitHubClient()
-    try:
-        return json.dumps(client.get_pr(owner, repo, index), indent=2)
-    except Exception as exc:
-        return f"Error fetching PR: {exc}"
-    finally:
-        client.close()
-
-
-@tool
-def github_post_comment(owner: str, repo: str, index: int, body: str) -> str:
-    """Post a review comment on a GitHub pull request.
-
-    Args:
-        owner: Repository owner.
-        repo: Repository name.
-        index: PR number.
-        body: Markdown comment body.
-
-    Returns:
-        Confirmation string with the comment ID, or an error message.
-    """
-    client = GitHubClient()
-    try:
-        result = client.post_issue_comment(owner, repo, index, body)
-        return f"Comment posted (id={result.get('id', '?')})"
-    except Exception as exc:
-        return f"Error posting comment: {exc}"
-    finally:
-        client.close()
-
-
-@tool
-def github_create_pr(
-    owner: str,
-    repo: str,
-    title: str,
-    body: str,
-    head: str,
-    base: str,
-) -> str:
-    """Open a new pull request on GitHub.
-
-    Args:
-        owner: Repository owner.
-        repo: Repository name.
-        title: PR title.
-        body: PR description (Markdown).
-        head: Source branch name.
-        base: Target branch name (e.g. "main").
-
-    Returns:
-        HTML URL of the created PR, or an error message.
-    """
-    client = GitHubClient()
-    try:
-        result = client.create_pr(owner, repo, title, body, head, base)
-        return result.get("html_url", str(result))
-    except Exception as exc:
-        return f"Error creating PR: {exc}"
-    finally:
-        client.close()
-
-
-@tool
-def github_approve_pr(owner: str, repo: str, index: int, body: str = "LGTM") -> str:
-    """Approve a pull request on GitHub.
-
-    Args:
-        owner: Repository owner.
-        repo: Repository name.
-        index: PR number.
-        body: Optional review body text (default: "LGTM").
-
-    Returns:
-        Confirmation string with the review ID, or an error message.
-    """
-    client = GitHubClient()
-    try:
-        result = client.approve_pr(owner, repo, index, body)
-        return f"PR approved (review_id={result.get('id', '?')})"
-    except Exception as exc:
-        return f"Error approving PR: {exc}"
-    finally:
-        client.close()
-
-
-def get_github_tools() -> list:
-    """Return the list of LangChain GitHub tools."""
-    return [github_get_pr, github_post_comment, github_create_pr, github_approve_pr]

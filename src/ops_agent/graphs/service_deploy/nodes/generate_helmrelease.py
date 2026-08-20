@@ -5,10 +5,8 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from ops_agent.graphs.interactive import steer_block as _steer_block
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import build_agent_messages
 from ops_agent.state import ServiceDeployState
 from ops_agent.types import EvidenceItem
 
@@ -57,23 +55,23 @@ def generate_helmrelease(state: ServiceDeployState) -> dict[str, Any]:
     spec = state.get("spec", {})
     review_issues = state.get("review_issues", [])
     issue_block = "\n".join(f"- {i}" for i in review_issues) if review_issues else ""
-    steer_block = _steer_block(state.get("new_inputs", []))
+    steering_text = "\n".join(
+        f"@{c.get('author', '?')}: {c.get('text', '')}" for c in state.get("new_inputs", [])
+    )
 
     llm = get_llm("coding")
-    messages = [
-        SystemMessage(content=_HELMRELEASE_SYSTEM),
-        HumanMessage(
-            content=(
-                f"Service spec: {json.dumps(spec, indent=2)}\n\n"
-                f"Helm chart: {state.get('helm_chart_ref') or 'unknown'}\n\n"
-                f"Conventions:\n{state.get('conventions', '')}\n\n"
-                f"Service evidence:\n{_format_evidence(state.get('service_evidence', []))}\n\n"
-                + (f"Previous review issues (fix these):\n{issue_block}\n\n" if issue_block else "")
-                + steer_block
-                + "Generate the HelmRelease and values.yaml."
-            )
-        ),
-    ]
+    messages = build_agent_messages(
+        system=_HELMRELEASE_SYSTEM,
+        untrusted_blocks=[
+            ("service_spec", json.dumps(spec, indent=2)),
+            ("helm_chart", state.get("helm_chart_ref") or "unknown"),
+            ("conventions", state.get("conventions", "")),
+            ("service_evidence", _format_evidence(state.get("service_evidence", []))),
+            ("previous_review_issues", issue_block),
+            ("pr_steering", steering_text),
+        ],
+        trusted_tail="Generate the HelmRelease and values.yaml.",
+    )
 
     response = llm.invoke(messages)
     content: str = response.content if hasattr(response, "content") else str(response)

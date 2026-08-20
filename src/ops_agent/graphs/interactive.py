@@ -28,9 +28,24 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from ops_agent.config import get_settings
 from ops_agent.tools.github import GitHubClient
 
 logger = logging.getLogger(__name__)
+
+# Cap on per-review line-comment API lookups (N+1 mitigation); only the newest
+# few empty-bodied reviews are inspected.
+_MAX_EMPTY_REVIEW_COMMENT_FETCHES = 3
+
+
+def get_trusted_reviewers() -> set[str]:
+    """Return the set of GitHub logins allowed to steer the graphs (cached).
+
+    Entries are lowercased. An empty set means nobody is trusted: steering is
+    fully disabled (no foreign comment can re-drive a graph). This is a cheap,
+    config-driven trust model — no extra GitHub scopes required.
+    """
+    return {login.strip().lower() for login in get_settings().trusted_github_logins if login.strip()}
 
 
 @functools.lru_cache(maxsize=1)
@@ -89,10 +104,14 @@ def _normalize_comments(comments: list[dict]) -> list[dict]:
 
 def _normalize_reviews(client: GitHubClient, owner: str, repo: str, index: int, reviews: list[dict]) -> list[dict]:
     acts: list[dict] = []
+    # Per-review line-comment fetch is an N+1 API call; cap it to the newest
+    # few empty-bodied reviews (latest steering is the most relevant).
+    empty_ids = [rv.get("id") for rv in reviews if not (rv.get("body") or "").strip()]
+    capped_ids = set(empty_ids[:_MAX_EMPTY_REVIEW_COMMENT_FETCHES])
     for rv in reviews:
         text = rv.get("body", "") or ""
         # A review may carry its steer only in line comments (empty body).
-        if not text.strip():
+        if not text.strip() and rv.get("id") in capped_ids:
             try:
                 line = client.list_pr_review_comments(owner, repo, index, rv.get("id"))
             except Exception:
@@ -114,11 +133,24 @@ def _bot_boundary(activities: list[dict], bot_login: str | None) -> datetime | N
     return max(ours) if ours else None
 
 
-def _foreign_since(activities: list[dict], bot_login: str | None, boundary: datetime | None) -> list[dict]:
+def _foreign_since(
+    activities: list[dict],
+    bot_login: str | None,
+    boundary: datetime | None,
+    trusted_only: bool = True,
+    trusted: set[str] | None = None,
+) -> list[dict]:
     """Foreign activities newer than the boundary that carry actual text.
 
     Bare approvals / empty activities are skipped so they never re-trigger a run.
+
+    When ``trusted_only`` is True, only authors in ``trusted`` are returned —
+    everyone else is filtered out so untrusted text can never route back into
+    the LLM. If ``trusted`` is empty (no trusted reviewers configured), *all*
+    foreign input is filtered out, which effectively disables steering.
     """
+    if trusted is None:
+        trusted = set()
     out: list[dict] = []
     for a in activities:
         if bot_login is not None and a["author"] == bot_login:
@@ -127,18 +159,36 @@ def _foreign_since(activities: list[dict], bot_login: str | None, boundary: date
             continue
         if not a["text"].strip():
             continue
+        if trusted_only and a["author"].lower() not in trusted:
+            logger.debug("ignoring steering from untrusted author %r (layer 7)", a["author"])
+            continue
         out.append({k: v for k, v in a.items() if k != "_ts"})
     return out
 
 
 def new_steering_inputs(
-    client: GitHubClient, owner: str, repo: str, index: int, bot_login: str | None
+    client: GitHubClient,
+    owner: str,
+    repo: str,
+    index: int,
+    bot_login: str | None,
+    trusted_only: bool | None = None,
+    trusted: set[str] | None = None,
 ) -> list[dict]:
     """All foreign, unhandled steering input on a PR — comments AND reviews.
+
+    By default applies the configured trusted-author gating (layer 7): when
+    ``STEERING_TRUSTED_ONLY`` is enabled only commenters in
+    ``TRUSTED_GITHUB_LOGINS`` re-drive the graph; everyone else is dropped.
 
     Returns plain dicts (kind/ref/author/text/created_at/state) suitable for the
     ``new_inputs`` state channel, ordered as fetched.
     """
+    if trusted_only is None:
+        trusted_only = get_settings().steering_trusted_only
+    if trusted is None:
+        trusted = get_trusted_reviewers()
+
     comments = client.list_issue_comments(owner, repo, index)
     try:
         reviews = client.list_pr_reviews(owner, repo, index)
@@ -148,7 +198,7 @@ def new_steering_inputs(
 
     activities = _normalize_comments(comments) + _normalize_reviews(client, owner, repo, index, reviews)
     boundary = _bot_boundary(activities, bot_login)
-    return _foreign_since(activities, bot_login, boundary)
+    return _foreign_since(activities, bot_login, boundary, trusted_only=trusted_only, trusted=trusted)
 
 
 def head_commit_sha(pr: dict) -> str | None:
@@ -158,14 +208,3 @@ def head_commit_sha(pr: dict) -> str | None:
     integer count, not a list, so indexing it raises TypeError.
     """
     return (pr.get("head") or {}).get("sha")
-
-
-def steer_block(new_inputs: list[dict]) -> str:
-    """Render steering comment(s)/review(s) as a prompt block, or '' if none."""
-    if not new_inputs:
-        return ""
-    joined = "\n".join(f"@{c.get('author', '?')}: {c.get('text', '')}" for c in new_inputs)
-    return (
-        "A reviewer left steering feedback on the PR — adjust the deployment "
-        f"to satisfy the request(s):\n{joined}\n\n"
-    )

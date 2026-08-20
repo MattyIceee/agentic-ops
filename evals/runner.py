@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from evals.loader import EvalExample, load_examples
+
 # Allow running as ``python -m evals.runner`` from the project root without
 # installing the package (src layout).
 _src = Path(__file__).parent.parent / "src"
@@ -32,8 +34,6 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from evals.loader import EvalExample, load_examples
-
 
 # ---------------------------------------------------------------------------
 # Prediction helper
@@ -42,25 +42,37 @@ from evals.loader import EvalExample, load_examples
 
 def _predict(example: EvalExample) -> bool:
     """Run extract_breaking_changes on stored evidence; return True if breaking."""
-    from ops_agent.state import EvidenceItem, RenovateReviewState
-    from ops_agent.graphs.renovate_review import extract_breaking_changes
+    from ops_agent.graphs.update_review.nodes.extract_breaking_changes import (
+        extract_breaking_changes,
+    )
+    from ops_agent.state import EvidenceItem, UpdateReviewState
 
     evidence = [
         EvidenceItem(source=e.source, url=e.url, text=e.text)
         for e in example.evidence
     ]
 
-    # Build a minimal state — only the fields extract_breaking_changes reads.
-    state: RenovateReviewState = {  # type: ignore[typeddict-item]
+    # Build a minimal state — only the fields extract_breaking_changes reads,
+    # plus the declared channels so the TypedDict is valid.
+    state: UpdateReviewState = {  # type: ignore[typeddict-item]
         "pr_index": 0,
+        "_owner": "",
+        "_repo": "",
+        "thread_id": "",
         "dependency": example.dependency,
         "current_version": example.old_version,
         "new_version": example.new_version,
         "diff": "",
         "renovate_rating": None,
         "evidence": evidence,
+        "_findings": [],
+        "_risk": None,
         "verdict": None,
+        "_quote": None,
         "posted": False,
+        "new_inputs": [],
+        "turn": 0,
+        "_route": "",
     }
 
     result: dict[str, Any] = extract_breaking_changes(state)

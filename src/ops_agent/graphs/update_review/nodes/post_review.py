@@ -23,8 +23,12 @@ def _render_findings(findings: list[Finding], category: str) -> list[str]:
 
 
 def _render_risk(risk: RiskAssessment | None) -> list[str]:
-    """Render the reasoned (non-verbatim) risk assessment, if it has an opinion."""
-    if not risk or (not risk.could_break and risk.risk_level in ("none", "low")):
+    """Render the reasoned (non-verbatim) risk assessment, if it has an opinion.
+
+    Mirrors assemble_verdict's threshold: only a medium/high risk that could
+    break influences the decision, so only that is rendered.
+    """
+    if not risk or not (risk.could_break and risk.risk_level in ("medium", "high")):
         return []
     lines = [
         "",
@@ -129,13 +133,16 @@ def post_review(state: UpdateReviewState) -> dict[str, Any]:
     verdict: Verdict = state["verdict"]  # type: ignore[assignment]
 
     comment = _build_comment(state)
+    turn = state.get("turn", 0) or 0
 
     client = GitHubClient()
     try:
         client.post_issue_comment(owner, repo, index, comment)
 
-        # Auto-approve if no breaking changes detected
-        if verdict.decision == "clear":
+        # Auto-approve if no breaking changes detected — but only on the FIRST
+        # review. Comment-driven re-drives (turn > 0) re-post the verdict and
+        # must not spam an approval review on every turn.
+        if verdict.decision == "clear" and turn == 0:
             try:
                 client.approve_pr(owner, repo, index, body=verdict.summary)
             except Exception as approve_exc:

@@ -17,11 +17,10 @@ ops-agent/
   tools/
     search.py           # SearXNG web search
     fetch.py            # URL fetcher → markdown text
-    git_ops.py          # Local git: diff, branch, commit, push
-    github.py           # GitHub REST client + LangChain tools
+    github.py           # GitHub REST client
   graphs/
-    renovate_review.py  # Graph A — PR annotation pipeline
-    scaffold_deploy.py  # Graph B — manifest generation pipeline
+    update_review/      # Graph A — PR annotation pipeline nodes + graph
+    service_deploy/     # Graph B — manifest generation pipeline nodes + graph
   cli.py                # `ops-agent` entry point
 ```
 
@@ -87,7 +86,8 @@ Copy `.env.example` to `.env` and set:
 | `GITHUB_TOKEN` | **Yes** | — | GitHub fine-grained PAT with repo read/write scope |
 | `GIT_AUTHOR_NAME` | No | `ops-agent` | Git commit author name |
 | `GIT_AUTHOR_EMAIL` | No | `ops-agent@homelab.local` | Git commit author email |
-| `EXAMPLE_REPO_PATH` | No | — | Absolute path to a local repo Graph B reads for conventions |
+| `TRUSTED_GITHUB_LOGINS` | No | — | Comma-separated GitHub logins whose PR comments/reviews may steer (re-drive) the graphs. Empty = no one may steer. |
+| `STEERING_TRUSTED_ONLY` | No | `true` | Only trusted logins may re-trigger work; untrusted comments are ignored by the graphs. |
 | `REQUEST_TIMEOUT_SECONDS` | No | `120` | HTTP timeout for all outbound requests |
 
 ### GitHub token
@@ -137,7 +137,7 @@ The agent will:
 1. Parse the request into a service spec.
 2. Research the service (image, ports, env, volumes).
 3. Check for an upstream Helm chart on Artifact Hub.
-4. Read your `EXAMPLE_REPO_PATH` repo for Kustomize/Flux conventions.
+4. Read your target GitOps repo (`--owner`/`--repo`, or set in state) for Kustomize/Flux conventions.
 5. Generate a `HelmRelease` + `values.yaml` (if a chart exists) or Kustomize manifests.
 6. Self-review against your conventions; retry up to 2 times if issues are found.
 7. Create a branch, commit the manifests, push, and open a GitHub PR.

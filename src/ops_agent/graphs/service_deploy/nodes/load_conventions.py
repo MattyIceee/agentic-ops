@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from ops_agent.config import get_settings
 from ops_agent.graphs.service_deploy.nodes.commit_and_pr import _get_or_clone_repo
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import build_agent_messages
 from ops_agent.state import ServiceDeployState
 
 logger = logging.getLogger(__name__)
@@ -130,16 +130,16 @@ def load_conventions(state: ServiceDeployState) -> dict[str, Any]:
     )
 
     llm = get_llm("research")
-    messages = [
-        SystemMessage(content=_CONVENTIONS_SYSTEM),
-        HumanMessage(
-            content=(
-                f"Repository structure:\n{structure}\n\n"
-                f"Sample files:\n{samples_block}\n\n"
-                "Summarize the conventions."
-            )
-        ),
-    ]
+    # Repo structure and sample YAML come from the target repo, which we treat
+    # as untrusted data (a hostile repo could embed directives).
+    messages = build_agent_messages(
+        system=_CONVENTIONS_SYSTEM,
+        untrusted_blocks=[
+            ("repo_structure", structure),
+            ("sample_files", samples_block),
+        ],
+        trusted_tail="Summarize the conventions the repo follows.",
+    )
 
     response = llm.invoke(messages)
     conventions: str = response.content if hasattr(response, "content") else str(response)

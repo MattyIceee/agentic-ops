@@ -4,10 +4,10 @@ import json
 import logging
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import build_agent_messages
 from ops_agent.state import ServiceDeployState
 
 logger = logging.getLogger(__name__)
@@ -53,16 +53,18 @@ def self_review(state: ServiceDeployState) -> dict[str, Any]:
         llm = get_llm("extract")
         structured_llm = llm.with_structured_output(ReviewResult)
 
-        messages = [
-            SystemMessage(content=_SELF_REVIEW_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"Service spec: {json.dumps(state.get('spec', {}), indent=2)}\n\n"
-                    f"Conventions:\n{state.get('conventions', '')}\n\n"
-                    f"Generated manifests:\n{manifest_block}"
-                )
+        messages = build_agent_messages(
+            system=_SELF_REVIEW_SYSTEM,
+            untrusted_blocks=[
+                ("spec", json.dumps(state.get("spec", {}), indent=2)),
+                ("conventions", state.get("conventions", "")),
+                ("manifests", manifest_block),
+            ],
+            trusted_tail=(
+                "Review the generated manifests and report passed/issues as a JSON "
+                'object: {"passed": true/false, "issues": [...]}.'
             ),
-        ]
+        )
 
         result: ReviewResult = structured_llm.invoke(messages)  # type: ignore[assignment]
         return {"review_passed": result.passed, "review_issues": result.issues}

@@ -3,9 +3,8 @@
 import logging
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import build_agent_messages
 from ops_agent.state import UpdateReviewState
 from ops_agent.types import Finding, Findings
 
@@ -50,17 +49,15 @@ def extract_breaking_changes(state: UpdateReviewState) -> dict[str, Any]:
         llm = get_llm("extract")
         structured_llm = llm.with_structured_output(Findings)
 
-        messages = [
-            SystemMessage(content=_EXTRACT_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"Dependency: {state['dependency']} "
-                    f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
-                    f"Evidence:\n{evidence_block}\n\n"
-                    "Return a list of findings. Each must have claim, source, and quote."
-                )
+        messages = build_agent_messages(
+            system=_EXTRACT_SYSTEM,
+            untrusted_blocks=[("evidence", evidence_block)],
+            trusted_tail=(
+                f"Dependency: {state['dependency']} "
+                f"{state.get('current_version', '')} → {state.get('new_version', '')}\n\n"
+                "Return a list of findings. Each must have claim, source, and quote."
             ),
-        ]
+        )
 
         result: Findings = structured_llm.invoke(messages)  # type: ignore[assignment]
         findings: list[Finding] = result.findings if result else []

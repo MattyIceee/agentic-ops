@@ -17,6 +17,10 @@ def _test_settings(monkeypatch):
     # Tests are hermetic: never try to connect to PostgreSQL. The checkpoint
     # tests override this with an in-memory saver explicitly.
     monkeypatch.setenv("CHECKPOINT_ENABLED", "false")
+    # Trusted-reviewer gating (layer 7) is enabled for steering tests; these
+    # logins are used as trusted reviewers across the graph tests.
+    monkeypatch.setenv("TRUSTED_GITHUB_LOGINS", "human,mattyice")
+    monkeypatch.setenv("STEERING_TRUSTED_ONLY", "true")
 
     get_settings.cache_clear()
     yield

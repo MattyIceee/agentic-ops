@@ -1,10 +1,10 @@
 """Settings for ops-agent, loaded from environment / .env file."""
 
 import functools
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -44,6 +44,33 @@ class Settings(BaseSettings):
     github_api_base_url: str = "https://api.github.com/"
     github_base_url: str = "https://github.com"
     github_token: str = Field(..., description="GitHub fine-grained personal access token")
+
+    # GitHub logins of trusted human reviewers. Steering input (PR comments /
+    # reviews) authored by an account NOT in this list is treated as untrusted
+    # data: it cannot re-drive the graphs. Leave empty to disable steering
+    # entirely, or populate to allowlist who may re-trigger work. Comma-separated.
+    trusted_github_logins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    # Force steering to be trusted-author-only. When True, only comments from
+    # trusted_github_logins trigger a re-run; all other foreign text is
+    # captured for record but never routed back into the LLM. When False,
+    # any foreign comment may steer (not recommended for the deploy graph).
+    steering_trusted_only: bool = True
+
+    # Optional allow-list of hosts the fetch_url tool may retrieve (layer 5).
+    # Empty = allow all http(s) hosts (default, preserves research recall).
+    # Entries are matched by hostname, and may be a bare domain or include a
+    # single leading "*." for subdomains (e.g. "github.com", "*.github.io").
+    # Comma-separated.
+    fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("trusted_github_logins", "fetch_allowed_domains", mode="before")
+    @classmethod
+    def _split_csv(cls, v: object) -> object:
+        """Accept a plain comma-separated env string for list-of-str fields."""
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
     # Git commit identity
     git_author_name: str = "ops-agent"

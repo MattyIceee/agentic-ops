@@ -138,7 +138,29 @@ def _remote_branch_exists(repo: gitlib.Repo, branch_name: str) -> bool:
     return branch_name in [ref.remote_head for ref in repo.remotes.origin.refs]
 
 
-def _sync_and_branch(repo_dir: Path, branch_name: str) -> None:
+def _resolve_default_branch(repo: gitlib.Repo) -> str:
+    """Return the remote's default branch name.
+
+    Uses the local ``origin/HEAD`` symbolic ref first (no API call), falling
+    back to ``main`` then ``master`` when it cannot be resolved. Raises
+    ``RuntimeError`` if none of these exist on origin.
+    """
+    for remote in ("origin", "upstream"):
+        try:
+            resolved = repo.git.symbolic_ref(f"refs/remotes/{remote}/HEAD")
+            branch = resolved.rsplit("/", 1)[-1]
+            if branch:
+                return branch
+        except gitlib.GitCommandError:
+            continue
+    for candidate in ("main", "master"):
+        named = getattr(repo.refs, f"origin/{candidate}", None)
+        if named is not None:
+            return candidate
+    raise RuntimeError("could not determine the repository default branch")
+
+
+def _sync_and_branch(repo_dir: Path, branch_name: str, default_branch: str) -> None:
     """Prepare a correct local base for ``branch_name``, then check it out.
 
     Fetches first, then chooses the base so the follow-up commit always
@@ -147,7 +169,7 @@ def _sync_and_branch(repo_dir: Path, branch_name: str) -> None:
 
       * if origin already has the branch (an open PR), base the local branch on
         the REMOTE tip via a hard reset;
-      * otherwise create the branch from an up-to-date ``origin/main``.
+      * otherwise create the branch from an up-to-date ``origin/<default>``.
     """
     repo = gitlib.Repo(repo_dir)
     origin = repo.remotes.origin
@@ -167,13 +189,14 @@ def _sync_and_branch(repo_dir: Path, branch_name: str) -> None:
         repo.git.reset("--hard", remote_ref.name)
         logger.info("Based %s on remote tip %s", branch_name, remote_ref.name)
     else:
-        repo.heads.main.checkout()
-        repo.git.reset("--hard", "origin/main")
+        default_ref = f"origin/{default_branch}"
+        repo.heads[default_branch].checkout()
+        repo.git.reset("--hard", default_ref)
         if branch_name in [h.name for h in repo.heads]:
             repo.heads[branch_name].checkout()
         else:
             repo.create_head(branch_name).checkout()
-        logger.info("Created %s from origin/main", branch_name)
+        logger.info("Created %s from %s", branch_name, default_ref)
 
 
 def _push_branch(repo: gitlib.Repo, branch_name: str) -> None:
@@ -194,12 +217,13 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
     repo_name: str = state.get("_repo", "")  # type: ignore[typeddict-item]
 
     if not owner or not repo_name:
-        return {"pr_url": "ERROR: _owner and _repo must be set in state to commit changes."}
+        raise ValueError("_owner and _repo must be set in state to commit changes.")
 
     spec = state.get("spec", {})
     service_name = spec.get("name", "service")
     branch = f"ops-agent/deploy-{service_name}"
     manifests = state.get("manifests", {})
+    default_branch = "main"
 
     try:
         repo_dir = _get_or_clone_repo(
@@ -210,14 +234,18 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
             settings.github_token,
         )
 
-        _sync_and_branch(repo_dir, branch)
+        # Resolve the repo's real default branch (not assumed "main").
+        repo = gitlib.Repo(repo_dir)
+        default_branch = _resolve_default_branch(repo)
+        logger.info("Resolved default branch %s for %s/%s", default_branch, owner, repo_name)
+
+        _sync_and_branch(repo_dir, branch, default_branch)
 
         deploy_dir = repo_dir / "apps" / service_name
         deploy_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in manifests.items():
             (deploy_dir / fname).write_text(content, encoding="utf-8")
 
-        repo = gitlib.Repo(repo_dir)
         repo.git.add(A=True)
         author = gitlib.Actor(settings.git_author_name, settings.git_author_email)
         issue_number = state.get("issue_number")
@@ -269,15 +297,19 @@ def commit_and_pr(state: ServiceDeployState) -> dict[str, Any]:
                 title=f"feat: deploy {service_name}",
                 body=_build_pr_body(state),
                 head=branch,
-                base="main",
+                base=default_branch,
             )
             pr_url = pr.get("html_url", str(pr))
             pr_index = pr.get("number")
             logger.info("Created PR: %s", pr_url)
         finally:
             client.close()
-    except Exception as exc:
+    except Exception:
+        # Raising (instead of writing an error string into pr_url) leaves
+        # commit_and_pr as a pending node so a later run resumes at the PR
+        # creation step rather than re-running the whole pipeline. The branch
+        # was already pushed; that is recoverable.
         logger.exception("PR creation failed")
-        return {"pr_url": f"Branch pushed but PR creation failed: {exc}"}
+        raise
 
     return {"pr_url": pr_url, "pr_index": pr_index, "pr_branch": branch}

@@ -37,6 +37,7 @@ def triage(state: UpdateReviewState) -> dict[str, Any]:
     client = GitHubClient()
     try:
         pr = client.get_pr(owner, repo, index)
+        # Layer 7: only trusted reviewers' new input is considered steering.
         new_inputs = new_steering_inputs(client, owner, repo, index, bot)
     finally:
         client.close()

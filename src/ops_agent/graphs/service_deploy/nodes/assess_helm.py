@@ -8,6 +8,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
 from ops_agent.llm.personas import get_llm
+from ops_agent.prompting import untrusted_data_instruction
 from ops_agent.state import ServiceDeployState
 from ops_agent.tools.fetch import get_fetch_tool
 from ops_agent.tools.search import get_search_tool
@@ -43,7 +44,11 @@ def assess_helm(state: ServiceDeployState) -> dict[str, Any]:
 
         llm = get_llm("research")
         tools = [get_search_tool(), get_fetch_tool()]
-        agent = create_agent(llm, tools, system_prompt=_ASSESS_HELM_SYSTEM)
+        agent = create_agent(
+            llm,
+            tools,
+            system_prompt=f"{_ASSESS_HELM_SYSTEM}\n\n{untrusted_data_instruction()}",
+        )
 
         user_msg = (
             f"Assess whether a well-maintained upstream Helm chart exists for: {name}\n"
